@@ -101,7 +101,12 @@ export function TaskModal({
 
     if (isNew) {
       const { data, error } = await supabase.from('tasks').insert(payload).select().single()
-      if (error) { toast.error(error.message); setSaving(false); return }
+      if (error) {
+        console.error('Task insert error:', error)
+        toast.error('Failed to create task: ' + error.message)
+        setSaving(false)
+        return
+      }
       savedId = data.id
     } else {
       const changes: Record<string, { old: unknown; new: unknown }> = {}
@@ -112,16 +117,22 @@ export function TaskModal({
       }
 
       const { error } = await supabase.from('tasks').update(payload).eq('id', task!.id)
-      if (error) { toast.error(error.message); setSaving(false); return }
+      if (error) {
+        console.error('Task update error:', error)
+        toast.error('Failed to save task: ' + error.message)
+        setSaving(false)
+        return
+      }
 
       if (Object.keys(changes).length > 0) {
-        await supabase.from('edit_log').insert({
+        const { error: logErr } = await supabase.from('edit_log').insert({
           entity_type: 'task',
           entity_id: task!.id,
           edited_by_email: currentUser.email,
           edited_at: new Date().toISOString(),
           changes,
         })
+        if (logErr) console.error('Edit log error:', logErr)
       }
     }
 
@@ -190,7 +201,7 @@ export function TaskModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Status</Label>
-            <Select value={form.status} onValueChange={v => set('status', v)}>
+            <Select value={form.status} onValueChange={(v: string | null) => { if (v) set('status', v) }}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {TASK_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -199,7 +210,7 @@ export function TaskModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Assigned To</Label>
-            <Select value={form.assigned_to || NONE} onValueChange={v => set('assigned_to', v === NONE ? null : v)}>
+            <Select value={form.assigned_to ?? NONE} onValueChange={(v: string | null) => set('assigned_to', (!v || v === NONE) ? null : v)}>
               <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>— None —</SelectItem>
@@ -209,7 +220,7 @@ export function TaskModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Next Action By</Label>
-            <Select value={form.next_action_by || NONE} onValueChange={v => set('next_action_by', v === NONE ? null : v)}>
+            <Select value={form.next_action_by ?? NONE} onValueChange={(v: string | null) => set('next_action_by', (!v || v === NONE) ? null : v)}>
               <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>— None —</SelectItem>
