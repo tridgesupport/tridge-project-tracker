@@ -75,16 +75,16 @@ export default function AdminPage() {
   async function handleInvite() {
     if (!inviteForm.email.trim()) { toast.error('Email required'); return }
     setSaving(true)
-    // Send magic link via Supabase admin (requires service role in prod)
-    // For now we create the user record and let them use password reset
-    const { data, error } = await supabase.auth.admin?.inviteUserByEmail
-      ? await (supabase.auth as any).admin.inviteUserByEmail(inviteForm.email, {
-          data: { name: inviteForm.name, role: inviteForm.role, team: inviteForm.role === 'client' ? 'client' : 'internal' },
-        })
-      : { data: null, error: { message: 'Admin invite not available on client.' } }
 
-    if (error) {
-      toast.error('Could not send invite. ' + error.message)
+    const res = await fetch('/api/invite-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(inviteForm),
+    })
+    const json = await res.json()
+
+    if (!res.ok) {
+      toast.error('Could not send invite: ' + json.error)
     } else {
       toast.success('Invite sent to ' + inviteForm.email)
       setInviteOpen(false)
