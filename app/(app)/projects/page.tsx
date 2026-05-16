@@ -131,6 +131,7 @@ export default function ProjectsPage() {
                 <TableHead>Owner</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Priority</TableHead>
                 <TableHead>Start</TableHead>
                 <TableHead>End</TableHead>
                 <TableHead>Next Action By</TableHead>
@@ -150,6 +151,7 @@ export default function ProjectsPage() {
                   <TableCell>{(p as any).owner?.name || '—'}</TableCell>
                   <TableCell className="text-xs">{p.project_type}</TableCell>
                   <TableCell><StatusBadge status={p.status} /></TableCell>
+                  <TableCell className="text-xs">{p.priority ?? '—'}</TableCell>
                   <TableCell className="text-xs">{fmtDate(p.expected_start_date)}</TableCell>
                   <TableCell className="text-xs">{fmtDate(p.expected_end_date)}</TableCell>
                   <TableCell className="text-xs">{(p as any).next_action_by_user?.name || '—'}</TableCell>

@@ -26,6 +26,7 @@ const MILESTONE_STATUSES: MilestoneStatus[] = [
 ]
 
 const NONE = '__none__'
+const PRIORITY_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1)
 
 function fmtDate(d: string | null) {
   if (!d) return '—'
@@ -50,6 +51,7 @@ const emptyForm = () => ({
   status: 'Pending' as MilestoneStatus,
   assigned_to: null as string | null,
   next_action_by: null as string | null,
+  priority: null as number | null,
 })
 
 export function MilestoneSection({
@@ -86,6 +88,7 @@ export function MilestoneSection({
       status: m.status,
       assigned_to: m.assigned_to ?? null,
       next_action_by: m.next_action_by ?? null,
+      priority: m.priority ?? null,
     })
     setEditingMilestone(m)
     setAddingMilestone(false)
@@ -115,6 +118,7 @@ export function MilestoneSection({
       status: milestoneForm.status,
       assigned_to: milestoneForm.assigned_to || null,
       next_action_by: milestoneForm.next_action_by || null,
+      priority: milestoneForm.priority,
       project_id: projectId,
       last_edited_by: currentUser.id,
       last_edited_at: new Date().toISOString(),
@@ -273,6 +277,19 @@ export function MilestoneSection({
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-medium">Priority</Label>
+              <Select
+                value={milestoneForm.priority !== null ? String(milestoneForm.priority) : NONE}
+                onValueChange={(v: string | null) => set('priority', (!v || v === NONE) ? null : Number(v))}
+              >
+                <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>— None —</SelectItem>
+                  {PRIORITY_OPTIONS.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="flex gap-2 mt-4">
             <Button size="sm" onClick={saveMilestone} disabled={saving}>
@@ -310,6 +327,9 @@ export function MilestoneSection({
                   : <ChevronRight size={16} className="shrink-0 text-muted-foreground" />}
                 <span className="font-medium text-sm truncate">{m.milestone_name}</span>
                 <StatusBadge status={m.status} />
+                {m.priority !== null && (
+                  <span className="text-xs font-medium text-muted-foreground bg-muted rounded px-1.5 py-0.5">P{m.priority}</span>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0 ml-2" onClick={e => e.stopPropagation()}>
                 <span className="hidden sm:block text-xs text-muted-foreground">
@@ -378,6 +398,9 @@ export function MilestoneSection({
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="truncate">{t.task_name}</span>
                           <StatusBadge status={t.status} />
+                          {t.priority !== null && (
+                            <span className="text-xs font-medium text-muted-foreground bg-muted rounded px-1.5 py-0.5">P{t.priority}</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="hidden sm:block text-xs text-muted-foreground">

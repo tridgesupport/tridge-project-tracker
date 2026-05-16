@@ -56,6 +56,7 @@ export interface Project {
   last_edited_by: string | null
   last_edited_at: string | null
   created_at: string
+  priority: number | null
   owner?: User
   customer?: Client
   next_action_by_user?: User
@@ -75,6 +76,7 @@ export interface Milestone {
   last_edited_by: string | null
   last_edited_at: string | null
   created_at: string
+  priority: number | null
   assigned_to_user?: User
   next_action_by_user?: User
   tasks?: Task[]
@@ -97,6 +99,7 @@ export interface Task {
   last_edited_by: string | null
   last_edited_at: string | null
   created_at: string
+  priority: number | null
   assigned_to_user?: User
   next_action_by_user?: User
 }

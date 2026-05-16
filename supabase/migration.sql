@@ -58,7 +58,8 @@ create table if not exists public.projects (
   next_action_by uuid references public.users(id) on delete set null,
   last_edited_by uuid references public.users(id) on delete set null,
   last_edited_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  priority integer check (priority >= 1 and priority <= 10)
 );
 
 -- 4. Milestones
@@ -74,7 +75,8 @@ create table if not exists public.milestones (
   next_action_by uuid references public.users(id) on delete set null,
   last_edited_by uuid references public.users(id) on delete set null,
   last_edited_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  priority integer check (priority >= 1 and priority <= 10)
 );
 
 -- 5. Tasks
@@ -94,7 +96,8 @@ create table if not exists public.tasks (
   next_action_by uuid references public.users(id) on delete set null,
   last_edited_by uuid references public.users(id) on delete set null,
   last_edited_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  priority integer check (priority >= 1 and priority <= 10)
 );
 
 -- 6. Edit Log (append-only)
@@ -211,3 +214,10 @@ create index if not exists idx_milestones_project on public.milestones(project_i
 create index if not exists idx_tasks_milestone on public.tasks(milestone_id);
 create index if not exists idx_tasks_project on public.tasks(project_id);
 create index if not exists idx_edit_log_entity on public.edit_log(entity_id, entity_type);
+
+-- ============================================================
+-- Priority column (run if tables already exist)
+-- ============================================================
+alter table public.projects add column if not exists priority integer check (priority >= 1 and priority <= 10);
+alter table public.milestones add column if not exists priority integer check (priority >= 1 and priority <= 10);
+alter table public.tasks add column if not exists priority integer check (priority >= 1 and priority <= 10);

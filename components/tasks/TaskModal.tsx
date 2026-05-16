@@ -27,6 +27,7 @@ import { toast } from 'sonner'
 const TASK_STATUSES: TaskStatus[] = [
   'Pending', 'In Progress', 'Sent for Review', 'Sent for Correction', 'Completed',
 ]
+const PRIORITY_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1)
 
 interface TaskModalProps {
   open: boolean
@@ -59,6 +60,7 @@ export function TaskModal({
     status: 'Pending' as TaskStatus,
     assigned_to: null as string | null,
     next_action_by: null as string | null,
+    priority: null as number | null,
   })
   const [saving, setSaving] = useState(false)
 
@@ -75,11 +77,13 @@ export function TaskModal({
         status: task.status,
         assigned_to: task.assigned_to,
         next_action_by: task.next_action_by,
+        priority: task.priority ?? null,
       })
     } else {
       setForm({
         task_name: '', description: '', comments: '', links: '', documentation_link: '',
         start_date: null, end_date: null, status: 'Pending', assigned_to: null, next_action_by: null,
+        priority: null,
       })
     }
   }, [task, open])
@@ -225,6 +229,19 @@ export function TaskModal({
               <SelectContent>
                 <SelectItem value={NONE}>— None —</SelectItem>
                 {internalUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Priority</Label>
+            <Select
+              value={form.priority !== null ? String(form.priority) : NONE}
+              onValueChange={(v: string | null) => set('priority', (!v || v === NONE) ? null : Number(v))}
+            >
+              <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>— None —</SelectItem>
+                {PRIORITY_OPTIONS.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

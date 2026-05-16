@@ -28,6 +28,7 @@ const PROJECT_STATUSES: ProjectStatus[] = [
 ]
 const PROJECT_TYPES: ProjectType[] = ['Internal R&D', 'Existing Client', 'Potential Client']
 const NONE = '__none__'
+const PRIORITY_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1)
 
 function fmtDatetime(d: string) {
   try { return format(parseISO(d), 'dd MMM yy, HH:mm') } catch { return d }
@@ -60,6 +61,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     project_type: 'Internal R&D' as ProjectType,
     customer_id: null as string | null,
     next_action_by: null as string | null,
+    priority: null as number | null,
   })
 
   useEffect(() => {
@@ -94,6 +96,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             project_type: proj.project_type,
             customer_id: proj.customer_id,
             next_action_by: proj.next_action_by,
+            priority: proj.priority ?? null,
           })
         }
         await loadMilestones()
@@ -328,6 +331,20 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <SelectContent>
                 <SelectItem value={NONE}>— None —</SelectItem>
                 {internalUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Priority</Label>
+            <Select
+              value={form.priority !== null ? String(form.priority) : NONE}
+              onValueChange={(v: string | null) => set('priority', (!v || v === NONE) ? null : Number(v))}
+              disabled={!canEdit}
+            >
+              <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>— None —</SelectItem>
+                {PRIORITY_OPTIONS.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
