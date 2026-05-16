@@ -13,10 +13,21 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Menu, FolderKanban, Users, Settings, LogOut } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Menu, FolderKanban, Users, Settings, LogOut, KeyRound } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 const navItems = [
   { href: '/projects', label: 'Projects', icon: FolderKanban },
@@ -56,6 +67,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [profile, setProfile] = useState<User | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [changePwOpen, setChangePwOpen] = useState(false)
+  const [pwForm, setPwForm] = useState({ newPassword: '', confirmPassword: '' })
+  const [pwSaving, setPwSaving] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
@@ -71,6 +85,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   async function handleSignOut() {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  async function handleChangePassword() {
+    const { newPassword, confirmPassword } = pwForm
+    if (newPassword.length < 6) { toast.error('Password must be at least 6 characters'); return }
+    if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return }
+    setPwSaving(true)
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) {
+      toast.error(error.message)
+    } else {
+      toast.success('Password updated')
+      setChangePwOpen(false)
+      setPwForm({ newPassword: '', confirmPassword: '' })
+    }
+    setPwSaving(false)
   }
 
   const roleColors: Record<string, string> = {
@@ -120,6 +150,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     </Avatar>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setChangePwOpen(true)} className="gap-2 cursor-pointer">
+                      <KeyRound size={14} /> Change password
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={handleSignOut} className="text-red-600 gap-2 cursor-pointer">
                       <LogOut size={14} /> Sign out
                     </DropdownMenuItem>
@@ -132,6 +166,42 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
       </div>
+
+      <Dialog open={changePwOpen} onOpenChange={open => { setChangePwOpen(open); if (!open) setPwForm({ newPassword: '', confirmPassword: '' }) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="new-pw">New Password</Label>
+              <Input
+                id="new-pw"
+                type="password"
+                placeholder="••••••••"
+                value={pwForm.newPassword}
+                onChange={e => setPwForm(f => ({ ...f, newPassword: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="confirm-pw">Confirm Password</Label>
+              <Input
+                id="confirm-pw"
+                type="password"
+                placeholder="••••••••"
+                value={pwForm.confirmPassword}
+                onChange={e => setPwForm(f => ({ ...f, confirmPassword: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChangePwOpen(false)}>Cancel</Button>
+            <Button onClick={handleChangePassword} disabled={pwSaving}>
+              {pwSaving ? 'Saving…' : 'Update Password'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
