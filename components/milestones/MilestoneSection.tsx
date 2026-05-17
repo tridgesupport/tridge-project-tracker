@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { Milestone, Task, User, MilestoneStatus } from '@/types'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -16,6 +16,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { DatePicker } from '@/components/DatePicker'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
@@ -64,6 +72,11 @@ export function MilestoneSection({
   const [taskModal, setTaskModal] = useState<{ milestoneId: string; task: Task | null } | null>(null)
   const [milestoneForm, setMilestoneForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
+
+  function userName(id: string | null) {
+    if (!id) return '—'
+    return internalUsers.find(u => u.id === id)?.name || '—'
+  }
 
   function toggleExpand(id: string) {
     setExpanded(prev => {
@@ -175,11 +188,10 @@ export function MilestoneSection({
         setSaving(false)
         return
       }
-      // Auto-expand the new milestone so the user can immediately add tasks
       if (data?.id) {
         setExpanded(prev => new Set([...prev, data.id]))
       }
-      toast.success('Milestone added — expand it below to add tasks')
+      toast.success('Milestone added')
     }
 
     setSaving(false)
@@ -194,6 +206,9 @@ export function MilestoneSection({
     toast.success('Milestone deleted')
     await onRefresh()
   }
+
+  // colSpan for the tasks sub-row: matches milestone column count
+  const milestoneColSpan = canEdit ? 11 : 10
 
   return (
     <div>
@@ -302,7 +317,7 @@ export function MilestoneSection({
         </div>
       )}
 
-      {milestones.length === 0 && !addingMilestone && (
+      {milestones.length === 0 && !addingMilestone ? (
         <div className="text-center py-8 border-2 border-dashed rounded-lg">
           <p className="text-sm text-muted-foreground mb-3">No milestones yet.</p>
           {canEdit && (
@@ -311,121 +326,143 @@ export function MilestoneSection({
             </Button>
           )}
         </div>
-      )}
-
-      <div className="flex flex-col gap-2">
-        {milestones.map(m => (
-          <div key={m.id} className="border rounded-lg overflow-hidden">
-            {/* Milestone header row */}
-            <div
-              className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/30 select-none"
-              onClick={() => toggleExpand(m.id)}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                {expanded.has(m.id)
-                  ? <ChevronDown size={16} className="shrink-0 text-muted-foreground" />
-                  : <ChevronRight size={16} className="shrink-0 text-muted-foreground" />}
-                <span className="font-medium text-sm truncate">{m.milestone_name}</span>
-                <StatusBadge status={m.status} />
-                {m.priority !== null && (
-                  <span className="text-xs font-medium text-muted-foreground bg-muted rounded px-1.5 py-0.5">P{m.priority}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0 ml-2" onClick={e => e.stopPropagation()}>
-                <span className="hidden sm:block text-xs text-muted-foreground">
-                  {fmtDate(m.start_date)} → {fmtDate(m.end_date)}
-                </span>
-                {canEdit && (
-                  <>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      onClick={() => startEdit(m)}
-                    >
-                      <Pencil size={13} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-destructive"
-                      onClick={() => deleteMilestone(m.id)}
-                    >
-                      <Trash2 size={13} />
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Expanded: tasks */}
-            {expanded.has(m.id) && (
-              <div className="border-t px-4 py-3">
-                {m.description && (
-                  <p className="text-sm text-muted-foreground mb-3">{m.description}</p>
-                )}
-
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Tasks ({m.tasks?.length ?? 0})
-                  </span>
-                  {canEdit && (
-                    <Button
-                      size="sm"
-                      onClick={() => setTaskModal({ milestoneId: m.id, task: null })}
-                    >
-                      <Plus size={12} className="mr-1" /> Add Task
-                    </Button>
-                  )}
-                </div>
-
-                {(!m.tasks || m.tasks.length === 0) ? (
-                  <div className="text-center py-4 border border-dashed rounded-md">
-                    <p className="text-xs text-muted-foreground mb-2">No tasks yet.</p>
+      ) : milestones.length > 0 && (
+        <div className="rounded-md border overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8" />
+                <TableHead>Milestone Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Priority</TableHead>
+                <TableHead>Start</TableHead>
+                <TableHead>End</TableHead>
+                <TableHead>Assigned To</TableHead>
+                <TableHead>Next Action By</TableHead>
+                <TableHead>Last Edited By</TableHead>
+                <TableHead>Last Edited At</TableHead>
+                {canEdit && <TableHead className="w-20" />}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {milestones.map(m => (
+                <Fragment key={m.id}>
+                  <TableRow
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => toggleExpand(m.id)}
+                  >
+                    <TableCell className="text-muted-foreground">
+                      {expanded.has(m.id)
+                        ? <ChevronDown size={14} />
+                        : <ChevronRight size={14} />}
+                    </TableCell>
+                    <TableCell className="font-medium">{m.milestone_name}</TableCell>
+                    <TableCell><StatusBadge status={m.status} /></TableCell>
+                    <TableCell className="text-xs">{m.priority ?? '—'}</TableCell>
+                    <TableCell className="text-xs">{fmtDate(m.start_date)}</TableCell>
+                    <TableCell className="text-xs">{fmtDate(m.end_date)}</TableCell>
+                    <TableCell className="text-xs">{userName(m.assigned_to)}</TableCell>
+                    <TableCell className="text-xs">{userName(m.next_action_by)}</TableCell>
+                    <TableCell className="text-xs">{userName(m.last_edited_by)}</TableCell>
+                    <TableCell className="text-xs">{fmtDate(m.last_edited_at)}</TableCell>
                     {canEdit && (
-                      <Button size="sm" variant="outline" onClick={() => setTaskModal({ milestoneId: m.id, task: null })}>
-                        <Plus size={12} className="mr-1" /> Add Task
-                      </Button>
+                      <TableCell onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(m)}>
+                            <Pencil size={13} />
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => deleteMilestone(m.id)}>
+                            <Trash2 size={13} />
+                          </Button>
+                        </div>
+                      </TableCell>
                     )}
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {m.tasks.map(t => (
-                      <div
-                        key={t.id}
-                        className="flex items-center justify-between px-3 py-2 rounded-md border bg-background hover:bg-muted/20 text-sm"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="truncate">{t.task_name}</span>
-                          <StatusBadge status={t.status} />
-                          {t.priority !== null && (
-                            <span className="text-xs font-medium text-muted-foreground bg-muted rounded px-1.5 py-0.5">P{t.priority}</span>
+                  </TableRow>
+
+                  {expanded.has(m.id) && (
+                    <TableRow>
+                      <TableCell colSpan={milestoneColSpan} className="p-0 bg-muted/20">
+                        <div className="px-8 py-4">
+                          {m.description && (
+                            <p className="text-sm text-muted-foreground mb-3">{m.description}</p>
+                          )}
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                              Tasks ({m.tasks?.length ?? 0})
+                            </span>
+                            {canEdit && (
+                              <Button size="sm" onClick={() => setTaskModal({ milestoneId: m.id, task: null })}>
+                                <Plus size={12} className="mr-1" /> Add Task
+                              </Button>
+                            )}
+                          </div>
+
+                          {(!m.tasks || m.tasks.length === 0) ? (
+                            <div className="text-center py-4 border border-dashed rounded-md">
+                              <p className="text-xs text-muted-foreground mb-2">No tasks yet.</p>
+                              {canEdit && (
+                                <Button size="sm" variant="outline" onClick={() => setTaskModal({ milestoneId: m.id, task: null })}>
+                                  <Plus size={12} className="mr-1" /> Add Task
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="rounded-md border overflow-x-auto bg-background">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Task Name</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead>Priority</TableHead>
+                                    <TableHead>Start</TableHead>
+                                    <TableHead>End</TableHead>
+                                    <TableHead>Assigned To</TableHead>
+                                    <TableHead>Next Action By</TableHead>
+                                    <TableHead>Last Edited By</TableHead>
+                                    <TableHead>Last Edited At</TableHead>
+                                    {canEdit && <TableHead className="w-12" />}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {m.tasks.map(t => (
+                                    <TableRow key={t.id} className="hover:bg-muted/50">
+                                      <TableCell className="font-medium">{t.task_name}</TableCell>
+                                      <TableCell><StatusBadge status={t.status} /></TableCell>
+                                      <TableCell className="text-xs">{t.priority ?? '—'}</TableCell>
+                                      <TableCell className="text-xs">{fmtDate(t.start_date)}</TableCell>
+                                      <TableCell className="text-xs">{fmtDate(t.end_date)}</TableCell>
+                                      <TableCell className="text-xs">{userName(t.assigned_to)}</TableCell>
+                                      <TableCell className="text-xs">{userName(t.next_action_by)}</TableCell>
+                                      <TableCell className="text-xs">{userName(t.last_edited_by)}</TableCell>
+                                      <TableCell className="text-xs">{fmtDate(t.last_edited_at)}</TableCell>
+                                      {canEdit && (
+                                        <TableCell>
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-6 w-6"
+                                            onClick={() => setTaskModal({ milestoneId: m.id, task: t })}
+                                          >
+                                            <Pencil size={12} />
+                                          </Button>
+                                        </TableCell>
+                                      )}
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="hidden sm:block text-xs text-muted-foreground">
-                            {fmtDate(t.start_date)} → {fmtDate(t.end_date)}
-                          </span>
-                          {canEdit && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-6 w-6"
-                              onClick={() => setTaskModal({ milestoneId: m.id, task: t })}
-                            >
-                              <Pencil size={12} />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {taskModal && (
         <TaskModal
