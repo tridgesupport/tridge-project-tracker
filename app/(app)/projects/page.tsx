@@ -23,7 +23,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { DatePicker } from '@/components/DatePicker'
-import { Plus, Pencil } from 'lucide-react'
+import { Plus, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { toast } from 'sonner'
 
@@ -41,6 +41,40 @@ function fmtDate(d: string | null) {
   try { return format(parseISO(d), 'dd MMM yy') } catch { return d }
 }
 
+type SortState = { field: string; dir: 'asc' | 'desc' }
+
+function sortBy<T>(items: T[], sort: SortState | null, val: (item: T, f: string) => unknown): T[] {
+  if (!sort) return items
+  return [...items].sort((a, b) => {
+    const av = val(a, sort.field), bv = val(b, sort.field)
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    const cmp = typeof av === 'number' && typeof bv === 'number'
+      ? av - bv
+      : String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' })
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+}
+
+function SortHead({ label, field, sort, onSort, className }: {
+  label: string; field: string; sort: SortState | null
+  onSort: (f: string) => void; className?: string
+}) {
+  const active = sort?.field === field
+  const Icon = active ? (sort!.dir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown
+  return (
+    <TableHead
+      className={`cursor-pointer select-none whitespace-nowrap hover:text-foreground ${className ?? ''}`}
+      onClick={() => onSort(field)}
+    >
+      <div className="flex items-center gap-1">
+        {label}<Icon size={12} className={active ? 'text-foreground' : 'text-muted-foreground/40'} />
+      </div>
+    </TableHead>
+  )
+}
+
 type EditingCell = { projectId: string; field: string; textValue: string }
 
 export default function ProjectsPage() {
@@ -53,6 +87,28 @@ export default function ProjectsPage() {
   const [typeFilter, setTypeFilter] = useState(ALL)
   const [loading, setLoading] = useState(true)
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
+  const [sort, setSort] = useState<SortState | null>(null)
+
+  function toggleSort(field: string) {
+    setSort(s => s?.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
+  }
+
+  function projectVal(p: Project, f: string): unknown {
+    const map: Record<string, unknown> = {
+      project_name: p.project_name,
+      customer: (p as any).customer?.name ?? '',
+      owner_id: (p as any).owner?.name ?? '',
+      project_type: p.project_type,
+      status: p.status,
+      priority: p.priority,
+      expected_start_date: p.expected_start_date,
+      expected_end_date: p.expected_end_date,
+      next_action_by: (p as any).next_action_by_user?.name ?? '',
+      last_edited_by: (p as any).last_edited_by_user?.name ?? '',
+      last_edited_at: p.last_edited_at,
+    }
+    return map[f] ?? ''
+  }
 
   useEffect(() => {
     async function load() {
@@ -177,6 +233,7 @@ export default function ProjectsPage() {
     if (typeFilter !== ALL && p.project_type !== typeFilter) return false
     return true
   })
+  const sorted = sortBy(filtered, sort, projectVal)
 
   return (
     <div>
@@ -214,21 +271,21 @@ export default function ProjectsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Project Name</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Start</TableHead>
-                <TableHead>End</TableHead>
-                <TableHead>Next Action By</TableHead>
-                <TableHead>Last Edited By</TableHead>
-                <TableHead>Last Edited At</TableHead>
+                <SortHead label="Project Name"   field="project_name"        sort={sort} onSort={toggleSort} />
+                <SortHead label="Customer"        field="customer"            sort={sort} onSort={toggleSort} />
+                <SortHead label="Owner"           field="owner_id"            sort={sort} onSort={toggleSort} />
+                <SortHead label="Type"            field="project_type"        sort={sort} onSort={toggleSort} />
+                <SortHead label="Status"          field="status"              sort={sort} onSort={toggleSort} />
+                <SortHead label="Priority"        field="priority"            sort={sort} onSort={toggleSort} />
+                <SortHead label="Start"           field="expected_start_date" sort={sort} onSort={toggleSort} />
+                <SortHead label="End"             field="expected_end_date"   sort={sort} onSort={toggleSort} />
+                <SortHead label="Next Action By"  field="next_action_by"      sort={sort} onSort={toggleSort} />
+                <SortHead label="Last Edited By"  field="last_edited_by"      sort={sort} onSort={toggleSort} />
+                <SortHead label="Last Edited At"  field="last_edited_at"      sort={sort} onSort={toggleSort} />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map(p => (
+              {sorted.map(p => (
                 <TableRow key={p.id} className="hover:bg-muted/50">
 
                   {/* Project Name — pencil on hover to edit, link to navigate */}

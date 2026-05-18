@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/table'
 import { DatePicker } from '@/components/DatePicker'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 
 const MILESTONE_STATUSES: MilestoneStatus[] = [
@@ -39,6 +39,40 @@ const PRIORITY_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1)
 function fmtDate(d: string | null) {
   if (!d) return '—'
   try { return format(parseISO(d), 'dd MMM yy') } catch { return d }
+}
+
+type SortState = { field: string; dir: 'asc' | 'desc' }
+
+function sortBy<T>(items: T[], sort: SortState | null, val: (item: T, f: string) => unknown): T[] {
+  if (!sort) return items
+  return [...items].sort((a, b) => {
+    const av = val(a, sort.field), bv = val(b, sort.field)
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    const cmp = typeof av === 'number' && typeof bv === 'number'
+      ? av - bv
+      : String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' })
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+}
+
+function SortHead({ label, field, sort, onSort, className }: {
+  label: string; field: string; sort: SortState | null
+  onSort: (f: string) => void; className?: string
+}) {
+  const active = sort?.field === field
+  const Icon = active ? (sort!.dir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown
+  return (
+    <TableHead
+      className={`cursor-pointer select-none whitespace-nowrap hover:text-foreground ${className ?? ''}`}
+      onClick={() => onSort(field)}
+    >
+      <div className="flex items-center gap-1">
+        {label}<Icon size={12} className={active ? 'text-foreground' : 'text-muted-foreground/40'} />
+      </div>
+    </TableHead>
+  )
 }
 
 interface MilestoneSectionProps {
@@ -67,6 +101,8 @@ export function MilestoneSection({
 }: MilestoneSectionProps) {
   const supabase = createClient()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [milestoneSort, setMilestoneSort] = useState<SortState | null>(null)
+  const [taskSort, setTaskSort] = useState<SortState | null>(null)
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null)
   const [addingMilestone, setAddingMilestone] = useState(false)
   const [taskModal, setTaskModal] = useState<{ milestoneId: string; task: Task | null } | null>(null)
@@ -76,6 +112,32 @@ export function MilestoneSection({
   function userName(id: string | null) {
     if (!id) return '—'
     return internalUsers.find(u => u.id === id)?.name || '—'
+  }
+
+  function toggleMilestoneSort(field: string) {
+    setMilestoneSort(s => s?.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
+  }
+  function toggleTaskSort(field: string) {
+    setTaskSort(s => s?.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
+  }
+
+  function milestoneVal(m: Milestone, f: string): unknown {
+    const map: Record<string, unknown> = {
+      milestone_name: m.milestone_name, status: m.status, priority: m.priority,
+      start_date: m.start_date, end_date: m.end_date,
+      assigned_to: userName(m.assigned_to), next_action_by: userName(m.next_action_by),
+      last_edited_by: userName(m.last_edited_by), last_edited_at: m.last_edited_at,
+    }
+    return map[f] ?? ''
+  }
+  function taskVal(t: Task, f: string): unknown {
+    const map: Record<string, unknown> = {
+      task_name: t.task_name, status: t.status, priority: t.priority,
+      start_date: t.start_date, end_date: t.end_date,
+      assigned_to: userName(t.assigned_to), next_action_by: userName(t.next_action_by),
+      last_edited_by: userName(t.last_edited_by), last_edited_at: t.last_edited_at,
+    }
+    return map[f] ?? ''
   }
 
   function toggleExpand(id: string) {
@@ -332,20 +394,20 @@ export function MilestoneSection({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8" />
-                <TableHead>Milestone Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Start</TableHead>
-                <TableHead>End</TableHead>
-                <TableHead>Assigned To</TableHead>
-                <TableHead>Next Action By</TableHead>
-                <TableHead>Last Edited By</TableHead>
-                <TableHead>Last Edited At</TableHead>
+                <SortHead label="Milestone Name"  field="milestone_name" sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="Status"          field="status"         sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="Priority"        field="priority"       sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="Start"           field="start_date"     sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="End"             field="end_date"       sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="Assigned To"     field="assigned_to"    sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="Next Action By"  field="next_action_by" sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="Last Edited By"  field="last_edited_by" sort={milestoneSort} onSort={toggleMilestoneSort} />
+                <SortHead label="Last Edited At"  field="last_edited_at" sort={milestoneSort} onSort={toggleMilestoneSort} />
                 {canEdit && <TableHead className="w-20" />}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {milestones.map(m => (
+              {sortBy(milestones, milestoneSort, milestoneVal).map(m => (
                 <Fragment key={m.id}>
                   <TableRow
                     className="cursor-pointer hover:bg-muted/50"
@@ -411,20 +473,20 @@ export function MilestoneSection({
                               <Table>
                                 <TableHeader>
                                   <TableRow>
-                                    <TableHead>Task Name</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Priority</TableHead>
-                                    <TableHead>Start</TableHead>
-                                    <TableHead>End</TableHead>
-                                    <TableHead>Assigned To</TableHead>
-                                    <TableHead>Next Action By</TableHead>
-                                    <TableHead>Last Edited By</TableHead>
-                                    <TableHead>Last Edited At</TableHead>
+                                    <SortHead label="Task Name"      field="task_name"      sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="Status"         field="status"         sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="Priority"       field="priority"       sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="Start"          field="start_date"     sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="End"            field="end_date"       sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="Assigned To"    field="assigned_to"    sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="Next Action By" field="next_action_by" sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="Last Edited By" field="last_edited_by" sort={taskSort} onSort={toggleTaskSort} />
+                                    <SortHead label="Last Edited At" field="last_edited_at" sort={taskSort} onSort={toggleTaskSort} />
                                     {canEdit && <TableHead className="w-12" />}
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                  {m.tasks.map(t => (
+                                  {sortBy(m.tasks, taskSort, taskVal).map(t => (
                                     <TableRow key={t.id} className="hover:bg-muted/50">
                                       <TableCell className="font-medium">{t.task_name}</TableCell>
                                       <TableCell><StatusBadge status={t.status} /></TableCell>
