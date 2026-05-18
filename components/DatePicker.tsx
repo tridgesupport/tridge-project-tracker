@@ -12,10 +12,11 @@ interface DatePickerProps {
   onChange: (value: string | null) => void
   placeholder?: string
   disabled?: boolean
+  autoOpen?: boolean
 }
 
-export function DatePicker({ value, onChange, placeholder = 'Pick a date', disabled }: DatePickerProps) {
-  const [open, setOpen] = useState(false)
+export function DatePicker({ value, onChange, placeholder = 'Pick a date', disabled, autoOpen }: DatePickerProps) {
+  const [open, setOpen] = useState(autoOpen ?? false)
   const date = value ? parseISO(value) : undefined
 
   return (
