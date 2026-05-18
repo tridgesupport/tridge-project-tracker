@@ -55,10 +55,11 @@ export default function LoginPage() {
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return }
     if (password !== confirm) { toast.error('Passwords do not match'); return }
     setLoading(true)
+    const emailRedirectTo = `${window.location.origin}/auth/confirm?next=/projects`
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name: name.trim() } },
+      options: { data: { name: name.trim() }, emailRedirectTo },
     })
     if (error) {
       toast.error(error.message)
