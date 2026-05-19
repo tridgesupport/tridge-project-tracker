@@ -1,8 +1,8 @@
 'use client'
 
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
-import type { Milestone, Task, User, MilestoneStatus, TaskStatus } from '@/types'
+import type { Milestone, Task, User, MilestoneStatus, TaskStatus, Comment } from '@/types'
 import { StatusBadge } from '@/components/StatusBadge'
 import { TaskModal } from '@/components/tasks/TaskModal'
 import { Button } from '@/components/ui/button'
@@ -26,7 +26,8 @@ import {
 } from '@/components/ui/table'
 import { DatePicker } from '@/components/DatePicker'
 import { toast } from 'sonner'
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, MessageCircle, Pencil, Plus, Trash2 } from 'lucide-react'
+import { CommentThread } from './CommentThread'
 import { format, parseISO } from 'date-fns'
 
 const MILESTONE_STATUSES: MilestoneStatus[] = [
@@ -102,16 +103,42 @@ const emptyForm = () => ({
 export function MilestoneSection({
   projectId, projectName, milestones, internalUsers, currentUser, canEdit, onRefresh,
 }: MilestoneSectionProps) {
-  const supabase = createClient()
+  const supabase = useRef(createClient()).current
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [milestoneSort, setMilestoneSort] = useState<SortState | null>(null)
   const [taskSort, setTaskSort] = useState<SortState | null>(null)
   const [taskEditingCell, setTaskEditingCell] = useState<{ taskId: string; field: string; textValue: string } | null>(null)
+  const [comments, setComments] = useState<Comment[]>([])
+  const [expandedTaskComments, setExpandedTaskComments] = useState<Set<string>>(new Set())
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null)
   const [addingMilestone, setAddingMilestone] = useState(false)
   const [taskModal, setTaskModal] = useState<{ milestoneId: string; task: Task | null } | null>(null)
   const [milestoneForm, setMilestoneForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
+
+  async function loadComments() {
+    const milestoneIds = milestones.map(m => m.id)
+    const taskIds = milestones.flatMap(m => m.tasks?.map(t => t.id) ?? [])
+    const allIds = [...milestoneIds, ...taskIds]
+    if (allIds.length === 0) { setComments([]); return }
+    const { data } = await supabase
+      .from('comments')
+      .select('*, author:users(id,name,email,role,team,created_at)')
+      .in('entity_id', allIds)
+      .order('created_at', { ascending: true })
+    if (data) setComments(data as Comment[])
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadComments() }, [milestones])
+
+  function toggleTaskComments(taskId: string) {
+    setExpandedTaskComments(s => {
+      const n = new Set(s)
+      n.has(taskId) ? n.delete(taskId) : n.add(taskId)
+      return n
+    })
+  }
 
   function userName(id: string | null) {
     if (!id) return '—'
@@ -546,12 +573,13 @@ export function MilestoneSection({
                                     <SortHead label="Next Action By" field="next_action_by" sort={taskSort} onSort={toggleTaskSort} />
                                     <SortHead label="Last Edited By" field="last_edited_by" sort={taskSort} onSort={toggleTaskSort} />
                                     <SortHead label="Last Edited At" field="last_edited_at" sort={taskSort} onSort={toggleTaskSort} />
-                                    {canEdit && <TableHead className="w-12" />}
+                                    <TableHead className="w-20" />
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                   {sortBy(m.tasks, taskSort, taskVal).map(t => (
-                                    <TableRow key={t.id} className="hover:bg-muted/50">
+                                    <Fragment key={t.id}>
+                                    <TableRow className="hover:bg-muted/50">
 
                                       {/* Task Name */}
                                       <TableCell className="font-medium">
@@ -652,20 +680,63 @@ export function MilestoneSection({
                                       <TableCell className="text-xs">{userName(t.last_edited_by)}</TableCell>
                                       <TableCell className="text-xs">{fmtDate(t.last_edited_at)}</TableCell>
 
-                                      {/* Full-edit modal button */}
-                                      {canEdit && (
-                                        <TableCell>
-                                          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setTaskModal({ milestoneId: m.id, task: t })}>
-                                            <Pencil size={12} />
+                                      {/* Actions: comment toggle + full-edit modal */}
+                                      <TableCell onClick={e => e.stopPropagation()}>
+                                        <div className="flex items-center gap-0.5">
+                                          <Button
+                                            size="icon" variant="ghost"
+                                            className={`h-6 w-6 relative ${expandedTaskComments.has(t.id) ? 'text-primary' : ''}`}
+                                            onClick={() => toggleTaskComments(t.id)}
+                                          >
+                                            <MessageCircle size={12} />
+                                            {comments.filter(c => c.entity_type === 'task' && c.entity_id === t.id).length > 0 && (
+                                              <span className="absolute -top-0.5 -right-0.5 text-[9px] bg-primary text-primary-foreground rounded-full min-w-[13px] h-[13px] flex items-center justify-center font-medium leading-none">
+                                                {comments.filter(c => c.entity_type === 'task' && c.entity_id === t.id).length}
+                                              </span>
+                                            )}
                                           </Button>
-                                        </TableCell>
-                                      )}
+                                          {canEdit && (
+                                            <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setTaskModal({ milestoneId: m.id, task: t })}>
+                                              <Pencil size={12} />
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </TableCell>
                                     </TableRow>
+                                    {expandedTaskComments.has(t.id) && (
+                                      <TableRow>
+                                        <TableCell colSpan={10} className="p-0 bg-muted/10 border-t-0">
+                                          <div className="px-6 py-3 border-b">
+                                            <CommentThread
+                                              entityType="task"
+                                              entityId={t.id}
+                                              comments={comments}
+                                              currentUser={currentUser}
+                                              canComment={canEdit}
+                                              onCommentAdded={loadComments}
+                                            />
+                                          </div>
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                    </Fragment>
                                   ))}
                                 </TableBody>
                               </Table>
                             </div>
                           )}
+
+                          {/* Milestone comments */}
+                          <div className="mt-4 pt-4 border-t">
+                            <CommentThread
+                              entityType="milestone"
+                              entityId={m.id}
+                              comments={comments}
+                              currentUser={currentUser}
+                              canComment={canEdit}
+                              onCommentAdded={loadComments}
+                            />
+                          </div>
                         </div>
                       </TableCell>
                     </TableRow>

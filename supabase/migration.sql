@@ -100,7 +100,17 @@ create table if not exists public.tasks (
   priority integer check (priority >= 1 and priority <= 10)
 );
 
--- 6. Edit Log (append-only)
+-- 6. Comments (append-only threaded comments on milestones and tasks)
+create table if not exists public.comments (
+  id uuid primary key default gen_random_uuid(),
+  entity_type text not null check (entity_type in ('milestone', 'task')),
+  entity_id uuid not null,
+  author_id uuid references public.users(id) on delete set null,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
+-- 7. Edit Log (append-only)
 create table if not exists public.edit_log (
   id uuid primary key default gen_random_uuid(),
   entity_type text not null check (entity_type in ('project','milestone','task')),
@@ -120,6 +130,7 @@ alter table public.projects enable row level security;
 alter table public.milestones enable row level security;
 alter table public.tasks enable row level security;
 alter table public.edit_log enable row level security;
+alter table public.comments enable row level security;
 
 -- Helper function: get current user's role
 create or replace function public.current_user_role()
@@ -196,6 +207,14 @@ create policy "tasks_delete" on public.tasks for delete using (
   current_user_role() in ('admin', 'internal')
 );
 
+-- COMMENTS policies
+create policy "comments_select" on public.comments for select using (
+  current_user_role() in ('admin', 'internal', 'client')
+);
+create policy "comments_insert" on public.comments for insert with check (
+  current_user_role() in ('admin', 'internal')
+);
+
 -- EDIT LOG policies
 create policy "edit_log_select" on public.edit_log for select using (
   current_user_role() in ('admin', 'internal')
@@ -214,6 +233,7 @@ create index if not exists idx_milestones_project on public.milestones(project_i
 create index if not exists idx_tasks_milestone on public.tasks(milestone_id);
 create index if not exists idx_tasks_project on public.tasks(project_id);
 create index if not exists idx_edit_log_entity on public.edit_log(entity_id, entity_type);
+create index if not exists idx_comments_entity on public.comments(entity_id, entity_type);
 
 -- ============================================================
 -- Priority column (run if tables already exist)

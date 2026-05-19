@@ -104,6 +104,16 @@ export interface Task {
   next_action_by_user?: User
 }
 
+export interface Comment {
+  id: string
+  entity_type: 'milestone' | 'task'
+  entity_id: string
+  author_id: string | null
+  content: string
+  created_at: string
+  author?: User | null
+}
+
 export interface EditLog {
   id: string
   entity_type: 'project' | 'milestone' | 'task'
