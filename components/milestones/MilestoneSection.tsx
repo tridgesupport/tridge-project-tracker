@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react'
 import { createClient } from '@/lib/supabase'
-import type { Milestone, Task, User, MilestoneStatus } from '@/types'
+import type { Milestone, Task, User, MilestoneStatus, TaskStatus } from '@/types'
 import { StatusBadge } from '@/components/StatusBadge'
 import { TaskModal } from '@/components/tasks/TaskModal'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,9 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Pencil, Plu
 import { format, parseISO } from 'date-fns'
 
 const MILESTONE_STATUSES: MilestoneStatus[] = [
+  'Pending', 'In Progress', 'Sent for Review', 'Sent for Correction', 'Completed',
+]
+const TASK_STATUSES: TaskStatus[] = [
   'Pending', 'In Progress', 'Sent for Review', 'Sent for Correction', 'Completed',
 ]
 
@@ -103,6 +106,7 @@ export function MilestoneSection({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [milestoneSort, setMilestoneSort] = useState<SortState | null>(null)
   const [taskSort, setTaskSort] = useState<SortState | null>(null)
+  const [taskEditingCell, setTaskEditingCell] = useState<{ taskId: string; field: string; textValue: string } | null>(null)
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null)
   const [addingMilestone, setAddingMilestone] = useState(false)
   const [taskModal, setTaskModal] = useState<{ milestoneId: string; task: Task | null } | null>(null)
@@ -138,6 +142,66 @@ export function MilestoneSection({
       last_edited_by: userName(t.last_edited_by), last_edited_at: t.last_edited_at,
     }
     return map[f] ?? ''
+  }
+
+  function isTaskEditing(taskId: string, field: string) {
+    return taskEditingCell?.taskId === taskId && taskEditingCell.field === field
+  }
+  function startTaskTextEdit(e: React.MouseEvent, taskId: string, field: string, current: string) {
+    e.stopPropagation()
+    if (!canEdit) return
+    setTaskEditingCell({ taskId, field, textValue: current })
+  }
+  function startTaskSelectEdit(e: React.MouseEvent, taskId: string, field: string) {
+    e.stopPropagation()
+    if (!canEdit) return
+    setTaskEditingCell({ taskId, field, textValue: '' })
+  }
+
+  async function saveTaskEdit(taskId: string, milestoneId: string, field: string, value: unknown) {
+    let task: Task | undefined
+    for (const m of milestones) {
+      task = m.tasks?.find(t => t.id === taskId)
+      if (task) break
+    }
+    if (!task) return
+    setTaskEditingCell(null)
+
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('tasks').update({
+      [field]: value,
+      last_edited_by: currentUser.id,
+      last_edited_at: now,
+    }).eq('id', taskId)
+    if (error) { toast.error('Save failed: ' + error.message); return }
+
+    supabase.from('edit_log').insert({
+      entity_type: 'task', entity_id: taskId,
+      edited_by_email: currentUser.email, edited_at: now,
+      changes: { [field]: { old: (task as any)[field], new: value } },
+    }).then(() => {})
+
+    if (field === 'next_action_by' && value && value !== task.next_action_by) {
+      const assignee = internalUsers.find(u => u.id === value)
+      if (assignee) {
+        fetch('/api/send-email', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toEmail: assignee.email, toName: assignee.name, entityType: 'Task',
+            entityName: task.task_name, projectName,
+            appUrl: `${window.location.origin}/projects/${projectId}`,
+          }),
+        }).catch(() => {})
+      }
+    }
+    await onRefresh()
+  }
+
+  async function commitTaskText(taskId: string, milestoneId: string, field: string) {
+    if (!taskEditingCell || taskEditingCell.taskId !== taskId || taskEditingCell.field !== field) return
+    const value = taskEditingCell.textValue.trim()
+    if (!value) { setTaskEditingCell(null); return }
+    await saveTaskEdit(taskId, milestoneId, field, value)
   }
 
   function toggleExpand(id: string) {
@@ -488,23 +552,110 @@ export function MilestoneSection({
                                 <TableBody>
                                   {sortBy(m.tasks, taskSort, taskVal).map(t => (
                                     <TableRow key={t.id} className="hover:bg-muted/50">
-                                      <TableCell className="font-medium">{t.task_name}</TableCell>
-                                      <TableCell><StatusBadge status={t.status} /></TableCell>
-                                      <TableCell className="text-xs">{t.priority ?? '—'}</TableCell>
-                                      <TableCell className="text-xs">{fmtDate(t.start_date)}</TableCell>
-                                      <TableCell className="text-xs">{fmtDate(t.end_date)}</TableCell>
-                                      <TableCell className="text-xs">{userName(t.assigned_to)}</TableCell>
-                                      <TableCell className="text-xs">{userName(t.next_action_by)}</TableCell>
+
+                                      {/* Task Name */}
+                                      <TableCell className="font-medium">
+                                        {isTaskEditing(t.id, 'task_name') ? (
+                                          <Input
+                                            autoFocus
+                                            className="h-7 text-sm min-w-[160px]"
+                                            value={taskEditingCell!.textValue}
+                                            onChange={e => setTaskEditingCell(c => c ? { ...c, textValue: e.target.value } : null)}
+                                            onBlur={() => commitTaskText(t.id, m.id, 'task_name')}
+                                            onKeyDown={e => {
+                                              if (e.key === 'Enter') commitTaskText(t.id, m.id, 'task_name')
+                                              if (e.key === 'Escape') setTaskEditingCell(null)
+                                            }}
+                                          />
+                                        ) : (
+                                          <div className="flex items-center gap-1.5 group">
+                                            <span>{t.task_name}</span>
+                                            {canEdit && (
+                                              <Pencil
+                                                size={11}
+                                                className="text-muted-foreground opacity-0 group-hover:opacity-100 cursor-pointer shrink-0"
+                                                onClick={e => startTaskTextEdit(e, t.id, 'task_name', t.task_name)}
+                                              />
+                                            )}
+                                          </div>
+                                        )}
+                                      </TableCell>
+
+                                      {/* Status */}
+                                      <TableCell className={canEdit ? 'cursor-pointer' : ''} onClick={e => startTaskSelectEdit(e, t.id, 'status')}>
+                                        {isTaskEditing(t.id, 'status') ? (
+                                          <Select open onOpenChange={open => { if (!open) setTaskEditingCell(null) }} value={t.status} onValueChange={v => saveTaskEdit(t.id, m.id, 'status', v)}>
+                                            <SelectTrigger className="h-7 text-xs min-w-[150px]"><SelectValue /></SelectTrigger>
+                                            <SelectContent>{TASK_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                                          </Select>
+                                        ) : <StatusBadge status={t.status} />}
+                                      </TableCell>
+
+                                      {/* Priority */}
+                                      <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startTaskSelectEdit(e, t.id, 'priority')}>
+                                        {isTaskEditing(t.id, 'priority') ? (
+                                          <Select open onOpenChange={open => { if (!open) setTaskEditingCell(null) }} value={t.priority !== null ? String(t.priority) : NONE} onValueChange={v => saveTaskEdit(t.id, m.id, 'priority', v === NONE ? null : Number(v))}>
+                                            <SelectTrigger className="h-7 text-xs w-20"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value={NONE}>— None —</SelectItem>
+                                              {PRIORITY_OPTIONS.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                                            </SelectContent>
+                                          </Select>
+                                        ) : t.priority ?? '—'}
+                                      </TableCell>
+
+                                      {/* Start date */}
+                                      <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startTaskSelectEdit(e, t.id, 'start_date')}>
+                                        {isTaskEditing(t.id, 'start_date') ? (
+                                          <div onClick={e => e.stopPropagation()}>
+                                            <DatePicker autoOpen value={t.start_date} onChange={v => saveTaskEdit(t.id, m.id, 'start_date', v)} />
+                                          </div>
+                                        ) : fmtDate(t.start_date)}
+                                      </TableCell>
+
+                                      {/* End date */}
+                                      <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startTaskSelectEdit(e, t.id, 'end_date')}>
+                                        {isTaskEditing(t.id, 'end_date') ? (
+                                          <div onClick={e => e.stopPropagation()}>
+                                            <DatePicker autoOpen value={t.end_date} onChange={v => saveTaskEdit(t.id, m.id, 'end_date', v)} />
+                                          </div>
+                                        ) : fmtDate(t.end_date)}
+                                      </TableCell>
+
+                                      {/* Assigned To */}
+                                      <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startTaskSelectEdit(e, t.id, 'assigned_to')}>
+                                        {isTaskEditing(t.id, 'assigned_to') ? (
+                                          <Select open onOpenChange={open => { if (!open) setTaskEditingCell(null) }} value={t.assigned_to ?? NONE} onValueChange={v => saveTaskEdit(t.id, m.id, 'assigned_to', v === NONE ? null : v)}>
+                                            <SelectTrigger className="h-7 text-xs min-w-[140px]"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value={NONE}>— None —</SelectItem>
+                                              {internalUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                                            </SelectContent>
+                                          </Select>
+                                        ) : userName(t.assigned_to)}
+                                      </TableCell>
+
+                                      {/* Next Action By */}
+                                      <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startTaskSelectEdit(e, t.id, 'next_action_by')}>
+                                        {isTaskEditing(t.id, 'next_action_by') ? (
+                                          <Select open onOpenChange={open => { if (!open) setTaskEditingCell(null) }} value={t.next_action_by ?? NONE} onValueChange={v => saveTaskEdit(t.id, m.id, 'next_action_by', v === NONE ? null : v)}>
+                                            <SelectTrigger className="h-7 text-xs min-w-[140px]"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value={NONE}>— None —</SelectItem>
+                                              {internalUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                                            </SelectContent>
+                                          </Select>
+                                        ) : userName(t.next_action_by)}
+                                      </TableCell>
+
+                                      {/* Read-only metadata */}
                                       <TableCell className="text-xs">{userName(t.last_edited_by)}</TableCell>
                                       <TableCell className="text-xs">{fmtDate(t.last_edited_at)}</TableCell>
+
+                                      {/* Full-edit modal button */}
                                       {canEdit && (
                                         <TableCell>
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-6 w-6"
-                                            onClick={() => setTaskModal({ milestoneId: m.id, task: t })}
-                                          >
+                                          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setTaskModal({ milestoneId: m.id, task: t })}>
                                             <Pencil size={12} />
                                           </Button>
                                         </TableCell>
