@@ -1,46 +1,29 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { getToken } from 'next-auth/jwt'
 
 export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+  const token = await getToken({ req: request, secret: process.env.AUTH_SECRET })
+  const pathname = request.nextUrl.pathname
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
+  const isPublic =
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/invite') ||
+    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/invite-accept') ||
+    pathname.startsWith('/api/register') ||
+    pathname.startsWith('/api/forgot-password') ||
+    pathname.startsWith('/api/change-password') ||
+    pathname.startsWith('/auth/reset-password')
 
-  const { data: { user } } = await supabase.auth.getUser()
+  if (isPublic) return NextResponse.next()
 
-  const isLoginPage = request.nextUrl.pathname === '/login'
-  const isApiRoute = request.nextUrl.pathname.startsWith('/api')
-
-  if (!user && !isLoginPage && !isApiRoute) {
+  if (!token) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  if (user && isLoginPage) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/projects'
-    return NextResponse.redirect(url)
-  }
-
-  return supabaseResponse
+  return NextResponse.next()
 }
 
 export const config = {

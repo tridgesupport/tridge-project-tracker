@@ -1,25 +1,17 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase'
+import { createTask, updateTask } from '@/lib/api'
 import type { Task, User, TaskStatus } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { DatePicker } from '@/components/DatePicker'
 import { toast } from 'sonner'
@@ -28,6 +20,7 @@ const TASK_STATUSES: TaskStatus[] = [
   'Pending', 'In Progress', 'Sent for Review', 'Sent for Correction', 'Completed',
 ]
 const PRIORITY_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1)
+const NONE = '__none__'
 
 interface TaskModalProps {
   open: boolean
@@ -41,12 +34,9 @@ interface TaskModalProps {
   projectName: string
 }
 
-const NONE = '__none__'
-
 export function TaskModal({
   open, onClose, onSaved, milestoneId, projectId, task, internalUsers, currentUser, projectName,
 }: TaskModalProps) {
-  const supabase = createClient()
   const isNew = !task
 
   const [form, setForm] = useState({
@@ -82,8 +72,8 @@ export function TaskModal({
     } else {
       setForm({
         task_name: '', description: '', comments: '', links: '', documentation_link: '',
-        start_date: null, end_date: null, status: 'Pending', assigned_to: null, next_action_by: null,
-        priority: null,
+        start_date: null, end_date: null, status: 'Pending', assigned_to: null,
+        next_action_by: null, priority: null,
       })
     }
   }, [task, open])
@@ -92,77 +82,49 @@ export function TaskModal({
     if (!form.task_name.trim()) { toast.error('Task name is required'); return }
     setSaving(true)
 
-    const payload = {
-      ...form,
-      milestone_id: milestoneId,
-      project_id: projectId,
-      last_edited_by: currentUser.id,
-      last_edited_at: new Date().toISOString(),
-    }
+    const now = new Date().toISOString()
+    const oldNextAction = task?.next_action_by
+    const notifyUser = form.next_action_by && form.next_action_by !== oldNextAction
+      ? internalUsers.find(u => u.id === form.next_action_by)
+      : null
 
-    let savedId = task?.id
-    let oldNextAction = task?.next_action_by
-
-    if (isNew) {
-      const { data, error } = await supabase.from('tasks').insert(payload).select().single()
-      if (error) {
-        console.error('Task insert error:', error)
-        toast.error('Failed to create task: ' + error.message)
-        setSaving(false)
-        return
-      }
-      savedId = data.id
-    } else {
-      const changes: Record<string, { old: unknown; new: unknown }> = {}
-      const fields = Object.keys(form) as (keyof typeof form)[]
-      for (const f of fields) {
-        const oldVal = task?.[f as keyof Task]
-        if (oldVal !== form[f]) changes[f] = { old: oldVal, new: form[f] }
-      }
-
-      const { error } = await supabase.from('tasks').update(payload).eq('id', task!.id)
-      if (error) {
-        console.error('Task update error:', error)
-        toast.error('Failed to save task: ' + error.message)
-        setSaving(false)
-        return
-      }
-
-      if (Object.keys(changes).length > 0) {
-        const { error: logErr } = await supabase.from('edit_log').insert({
-          entity_type: 'task',
-          entity_id: task!.id,
-          edited_by_email: currentUser.email,
-          edited_at: new Date().toISOString(),
-          changes,
+    try {
+      if (isNew) {
+        await createTask({
+          ...form,
+          milestone_id: milestoneId,
+          project_id: projectId,
+          last_edited_by: currentUser.id,
+          last_edited_at: now,
         })
-        if (logErr) console.error('Edit log error:', logErr)
+      } else {
+        const changes: Record<string, { old: unknown; new: unknown }> = {}
+        const fields = Object.keys(form) as (keyof typeof form)[]
+        for (const f of fields) {
+          const oldVal = task?.[f as keyof Task]
+          if (oldVal !== form[f]) changes[f] = { old: oldVal, new: form[f] }
+        }
+        await updateTask(task!.id, {
+          ...form,
+          last_edited_by: currentUser.id,
+          last_edited_at: now,
+          _changes: changes,
+          _editedByEmail: currentUser.email,
+          _notifyEmail: notifyUser?.email || null,
+          _notifyName: notifyUser?.name || null,
+          _taskName: form.task_name,
+          _projectName: projectName,
+          _projectId: projectId,
+        })
       }
+      toast.success(isNew ? 'Task created' : 'Task saved')
+      onSaved()
+      onClose()
+    } catch (err: any) {
+      toast.error('Failed to save task: ' + err.message)
+    } finally {
+      setSaving(false)
     }
-
-    // Email notification if next_action_by changed
-    if (form.next_action_by && form.next_action_by !== oldNextAction) {
-      const assignee = internalUsers.find(u => u.id === form.next_action_by)
-      if (assignee) {
-        fetch('/api/send-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            toEmail: assignee.email,
-            toName: assignee.name,
-            entityType: 'Task',
-            entityName: form.task_name,
-            projectName,
-            appUrl: `${window.location.origin}/projects/${projectId}`,
-          }),
-        }).catch(() => {})
-      }
-    }
-
-    toast.success(isNew ? 'Task created' : 'Task saved')
-    setSaving(false)
-    onSaved()
-    onClose()
   }
 
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
@@ -173,7 +135,6 @@ export function TaskModal({
         <DialogHeader>
           <DialogTitle>{isNew ? 'Add Task' : 'Edit Task'}</DialogTitle>
         </DialogHeader>
-
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
           <div className="sm:col-span-2 flex flex-col gap-1.5">
             <Label>Task Name *</Label>
@@ -189,11 +150,11 @@ export function TaskModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Links</Label>
-            <Input value={form.links} onChange={e => set('links', e.target.value)} placeholder="https://..." />
+            <Input value={form.links} onChange={e => set('links', e.target.value)} placeholder="https://…" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Documentation Link</Label>
-            <Input value={form.documentation_link} onChange={e => set('documentation_link', e.target.value)} placeholder="https://..." />
+            <Input value={form.documentation_link} onChange={e => set('documentation_link', e.target.value)} placeholder="https://…" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Start Date</Label>
@@ -214,7 +175,8 @@ export function TaskModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Assigned To</Label>
-            <Select value={form.assigned_to ?? NONE} onValueChange={(v: string | null) => set('assigned_to', (!v || v === NONE) ? null : v)}>
+            <Select value={form.assigned_to ?? NONE}
+              onValueChange={(v: string | null) => set('assigned_to', (!v || v === NONE) ? null : v)}>
               <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>— None —</SelectItem>
@@ -224,7 +186,8 @@ export function TaskModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Next Action By</Label>
-            <Select value={form.next_action_by ?? NONE} onValueChange={(v: string | null) => set('next_action_by', (!v || v === NONE) ? null : v)}>
+            <Select value={form.next_action_by ?? NONE}
+              onValueChange={(v: string | null) => set('next_action_by', (!v || v === NONE) ? null : v)}>
               <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>— None —</SelectItem>
@@ -234,10 +197,8 @@ export function TaskModal({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Priority</Label>
-            <Select
-              value={form.priority !== null ? String(form.priority) : NONE}
-              onValueChange={(v: string | null) => set('priority', (!v || v === NONE) ? null : Number(v))}
-            >
+            <Select value={form.priority !== null ? String(form.priority) : NONE}
+              onValueChange={(v: string | null) => set('priority', (!v || v === NONE) ? null : Number(v))}>
               <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>— None —</SelectItem>
@@ -246,7 +207,6 @@ export function TaskModal({
             </Select>
           </div>
         </div>
-
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase'
+import { signIn } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,7 +18,6 @@ const subtitles: Record<Mode, string> = {
 
 export default function LoginPage() {
   const router = useRouter()
-  const supabase = createClient()
   const [mode, setMode] = useState<Mode>('login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -26,22 +25,20 @@ export default function LoginPage() {
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [resetSent, setResetSent] = useState(false)
-  const [signupDone, setSignupDone] = useState(false)
 
   function switchTo(next: Mode) {
     setMode(next)
     setPassword('')
     setConfirm('')
     setResetSent(false)
-    setSignupDone(false)
   }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      toast.error(error.message)
+    const result = await signIn('credentials', { email, password, redirect: false })
+    if (result?.error) {
+      toast.error('Invalid email or password')
     } else {
       router.push('/projects')
       router.refresh()
@@ -55,23 +52,27 @@ export default function LoginPage() {
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return }
     if (password !== confirm) { toast.error('Passwords do not match'); return }
     setLoading(true)
-    const emailRedirectTo = `${window.location.origin}/auth/confirm?next=/projects`
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { name: name.trim() }, emailRedirectTo },
+
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), email, password }),
     })
-    if (error) {
-      toast.error(error.message)
+    const data = await res.json()
+
+    if (!res.ok) {
+      toast.error(data.error || 'Registration failed')
       setLoading(false)
       return
     }
-    // Session present → auto-confirmed, go straight in
-    if (data.session) {
+
+    const result = await signIn('credentials', { email, password, redirect: false })
+    if (result?.error) {
+      toast.success('Account created! Please sign in.')
+      switchTo('login')
+    } else {
       router.push('/projects')
       router.refresh()
-    } else {
-      setSignupDone(true)
     }
     setLoading(false)
   }
@@ -79,13 +80,12 @@ export default function LoginPage() {
   async function handleForgot(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    const redirectTo = `${window.location.origin}/auth/confirm?next=/auth/reset-password`
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
-    if (error) {
-      toast.error(error.message)
-    } else {
-      setResetSent(true)
-    }
+    await fetch('/api/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    setResetSent(true)
     setLoading(false)
   }
 
@@ -102,32 +102,23 @@ export default function LoginPage() {
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="email">Email</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="you@tridge.co.in"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
+                id="email" type="email" placeholder="you@tridge.co.in"
+                value={email} onChange={e => setEmail(e.target.value)} required
               />
             </div>
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
                 <button
-                  type="button"
-                  onClick={() => switchTo('forgot')}
+                  type="button" onClick={() => switchTo('forgot')}
                   className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
                 >
                   Forgot password?
                 </button>
               </div>
               <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
+                id="password" type="password" placeholder="••••••••"
+                value={password} onChange={e => setPassword(e.target.value)} required
               />
             </div>
             <Button type="submit" disabled={loading} className="mt-2">
@@ -135,61 +126,42 @@ export default function LoginPage() {
             </Button>
             <p className="text-xs text-center text-muted-foreground">
               Don&apos;t have an account?{' '}
-              <button
-                type="button"
-                onClick={() => switchTo('signup')}
-                className="text-foreground underline-offset-2 hover:underline"
-              >
+              <button type="button" onClick={() => switchTo('signup')}
+                className="text-foreground underline-offset-2 hover:underline">
                 Create one
               </button>
             </p>
           </form>
         )}
 
-        {mode === 'signup' && !signupDone && (
+        {mode === 'signup' && (
           <form onSubmit={handleSignup} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="name">Full Name</Label>
               <Input
-                id="name"
-                type="text"
-                placeholder="Jane Smith"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                required
+                id="name" type="text" placeholder="Jane Smith"
+                value={name} onChange={e => setName(e.target.value)} required
               />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="signup-email">Email</Label>
               <Input
-                id="signup-email"
-                type="email"
-                placeholder="you@tridge.co.in"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
+                id="signup-email" type="email" placeholder="you@tridge.co.in"
+                value={email} onChange={e => setEmail(e.target.value)} required
               />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="signup-password">Password</Label>
               <Input
-                id="signup-password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
+                id="signup-password" type="password" placeholder="••••••••"
+                value={password} onChange={e => setPassword(e.target.value)} required
               />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="signup-confirm">Confirm Password</Label>
               <Input
-                id="signup-confirm"
-                type="password"
-                placeholder="••••••••"
-                value={confirm}
-                onChange={e => setConfirm(e.target.value)}
-                required
+                id="signup-confirm" type="password" placeholder="••••••••"
+                value={confirm} onChange={e => setConfirm(e.target.value)} required
               />
             </div>
             <Button type="submit" disabled={loading} className="mt-2">
@@ -197,25 +169,12 @@ export default function LoginPage() {
             </Button>
             <p className="text-xs text-center text-muted-foreground">
               Already have an account?{' '}
-              <button
-                type="button"
-                onClick={() => switchTo('login')}
-                className="text-foreground underline-offset-2 hover:underline"
-              >
+              <button type="button" onClick={() => switchTo('login')}
+                className="text-foreground underline-offset-2 hover:underline">
                 Sign in
               </button>
             </p>
           </form>
-        )}
-
-        {mode === 'signup' && signupDone && (
-          <div className="flex flex-col gap-4 text-center">
-            <p className="text-sm text-muted-foreground">
-              Check your inbox — we sent a confirmation link to <strong>{email}</strong>.
-              Click it to activate your account.
-            </p>
-            <Button variant="outline" onClick={() => switchTo('login')}>Back to sign in</Button>
-          </div>
         )}
 
         {mode === 'forgot' && !resetSent && (
@@ -223,22 +182,15 @@ export default function LoginPage() {
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="reset-email">Email</Label>
               <Input
-                id="reset-email"
-                type="email"
-                placeholder="you@tridge.co.in"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
+                id="reset-email" type="email" placeholder="you@tridge.co.in"
+                value={email} onChange={e => setEmail(e.target.value)} required
               />
             </div>
             <Button type="submit" disabled={loading} className="mt-2">
               {loading ? 'Sending…' : 'Send reset link'}
             </Button>
-            <button
-              type="button"
-              onClick={() => switchTo('login')}
-              className="text-xs text-center text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
-            >
+            <button type="button" onClick={() => switchTo('login')}
+              className="text-xs text-center text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
               Back to sign in
             </button>
           </form>
@@ -247,7 +199,7 @@ export default function LoginPage() {
         {mode === 'forgot' && resetSent && (
           <div className="flex flex-col gap-4 text-center">
             <p className="text-sm text-muted-foreground">
-              Check your inbox — we sent a password reset link to <strong>{email}</strong>.
+              If an account exists for <strong>{email}</strong>, we sent a password reset link.
             </p>
             <Button variant="outline" onClick={() => switchTo('login')}>Back to sign in</Button>
           </div>

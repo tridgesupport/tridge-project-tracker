@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase'
+import { createComment } from '@/lib/api'
 import type { Comment, User } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -21,7 +21,6 @@ interface CommentThreadProps {
 export function CommentThread({
   entityType, entityId, comments, currentUser, canComment, onCommentAdded,
 }: CommentThreadProps) {
-  const supabase = createClient()
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -35,16 +34,15 @@ export function CommentThread({
     const content = text.trim()
     if (!content) return
     setSaving(true)
-    const { error } = await supabase.from('comments').insert({
-      entity_type: entityType,
-      entity_id: entityId,
-      author_id: currentUser.id,
-      content,
-    })
-    if (error) { toast.error('Failed to post comment: ' + error.message); setSaving(false); return }
-    setText('')
-    setSaving(false)
-    await onCommentAdded()
+    try {
+      await createComment({ entity_type: entityType, entity_id: entityId, author_id: currentUser.id, content })
+      setText('')
+      await onCommentAdded()
+    } catch (err: any) {
+      toast.error('Failed to post comment: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -77,9 +75,7 @@ export function CommentThread({
             placeholder="Add a comment… (Ctrl+Enter to post)"
             value={text}
             onChange={e => setText(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit()
-            }}
+            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit() }}
           />
           <Button size="sm" onClick={submit} disabled={saving || !text.trim()}>
             {saving ? 'Posting…' : 'Post'}

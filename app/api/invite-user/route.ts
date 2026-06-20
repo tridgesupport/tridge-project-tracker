@@ -1,34 +1,40 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { NextResponse } from 'next/server'
+import { auth } from '@/auth'
+import { sql } from '@/lib/db'
+import { Resend } from 'resend'
+import { randomUUID } from 'crypto'
 
-export async function POST(req: NextRequest) {
-  // Verify the caller is an authenticated admin
-  const caller = await createServerSupabaseClient()
-  const { data: { user } } = await caller.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { data: profile } = await caller.from('users').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+export async function POST(req: Request) {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (session.user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { email, name, role } = await req.json()
   if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 })
 
-  // Use service role client to send the invite
-  const adminClient = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
+  const token = randomUUID()
+  await sql`
+    INSERT INTO invites (email, name, role, token)
+    VALUES (${email.toLowerCase().trim()}, ${name ?? null}, ${role ?? 'internal'}, ${token})
+    ON CONFLICT DO NOTHING`
 
-  const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-    data: {
-      name: name || '',
-      role: role || 'internal',
-      team: role === 'client' ? 'client' : 'internal',
-    },
-  })
+  const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/invite/${token}`
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json({ ok: true, user: data.user })
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY)
+    await resend.emails.send({
+      from: process.env.EMAIL_FROM || 'noreply@tridge.co.in',
+      to: email,
+      subject: "You've been invited to Tridge Project Tracker",
+      html: `<p>Hi${name ? ` ${name}` : ''},</p>
+             <p>You've been invited to join the Tridge Project Tracker as a <strong>${role || 'internal'}</strong> user.</p>
+             <p><a href="${inviteUrl}">Click here to set up your account</a></p>
+             <p>This invite link expires in 7 days.</p>`,
+    })
+  } catch (err) {
+    console.error('Failed to send invite email:', err)
+    return NextResponse.json({ error: 'Failed to send invite email' }, { status: 500 })
+  }
+
+  return NextResponse.json({ ok: true })
 }

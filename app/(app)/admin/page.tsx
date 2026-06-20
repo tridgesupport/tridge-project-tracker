@@ -2,33 +2,21 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase'
+import { useSession } from 'next-auth/react'
 import type { User, UserRole } from '@/types'
+import { getUsers, updateUser } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { toast } from 'sonner'
 import { Pencil, UserPlus } from 'lucide-react'
@@ -42,9 +30,8 @@ const roleColors: Record<string, string> = {
 }
 
 export default function AdminPage() {
-  const supabase = createClient()
+  const { data: session } = useSession()
   const router = useRouter()
-  const [profile, setProfile] = useState<User | null>(null)
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -54,35 +41,32 @@ export default function AdminPage() {
   const [editForm, setEditForm] = useState({ name: '', role: 'internal' as UserRole })
   const [saving, setSaving] = useState(false)
 
+  const role = (session?.user as unknown as Record<string, string>)?.role
+
   useEffect(() => {
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data: prof } = await supabase.from('users').select('*').eq('id', user.id).single()
-      if (prof?.role !== 'admin') { router.push('/projects'); return }
-      setProfile(prof)
-      await loadUsers()
-      setLoading(false)
-    }
-    load()
-  }, [])
+    if (!session) return
+    if (role !== 'admin') { router.push('/projects'); return }
+    loadUsers().then(() => setLoading(false))
+  }, [session])
 
   async function loadUsers() {
-    const { data } = await supabase.from('users').select('*').order('name')
-    setUsers(data || [])
+    try {
+      const usrs = await getUsers()
+      setUsers(usrs)
+    } catch (err) {
+      toast.error('Failed to load users')
+    }
   }
 
   async function handleInvite() {
     if (!inviteForm.email.trim()) { toast.error('Email required'); return }
     setSaving(true)
-
     const res = await fetch('/api/invite-user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(inviteForm),
     })
     const json = await res.json()
-
     if (!res.ok) {
       toast.error('Could not send invite: ' + json.error)
     } else {
@@ -96,16 +80,16 @@ export default function AdminPage() {
   async function handleEditUser() {
     if (!editingUser) return
     setSaving(true)
-    const { error } = await supabase.from('users').update({
-      name: editForm.name,
-      role: editForm.role,
-      team: editForm.role === 'client' ? 'client' : 'internal',
-    }).eq('id', editingUser.id)
-    if (error) { toast.error(error.message); setSaving(false); return }
-    toast.success('User updated')
-    setSaving(false)
-    setEditOpen(false)
-    await loadUsers()
+    try {
+      await updateUser(editingUser.id, { name: editForm.name, role: editForm.role })
+      toast.success('User updated')
+      setEditOpen(false)
+      await loadUsers()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>
@@ -154,7 +138,6 @@ export default function AdminPage() {
         </Table>
       </div>
 
-      {/* Invite Dialog */}
       <Dialog open={inviteOpen} onOpenChange={v => !v && setInviteOpen(false)}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Invite User</DialogTitle></DialogHeader>
@@ -184,7 +167,6 @@ export default function AdminPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit User Dialog */}
       <Dialog open={editOpen} onOpenChange={v => !v && setEditOpen(false)}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Edit User</DialogTitle></DialogHeader>

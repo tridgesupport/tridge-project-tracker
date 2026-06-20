@@ -1,51 +1,44 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase'
-import type { Client, User } from '@/types'
+import { useSession } from 'next-auth/react'
+import type { Client } from '@/types'
+import { getClients, createClient, updateClient } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { toast } from 'sonner'
 import { Pencil, Plus } from 'lucide-react'
 
 export default function ClientsPage() {
-  const supabase = createClient()
+  const { data: session } = useSession()
   const [clients, setClients] = useState<Client[]>([])
-  const [profile, setProfile] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Client | null>(null)
   const [form, setForm] = useState({ name: '', contact: '', email: '' })
   const [saving, setSaving] = useState(false)
 
+  const role = (session?.user as unknown as Record<string, string>)?.role
+  const isAdmin = role === 'admin'
+
   useEffect(() => { load() }, [])
 
   async function load() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const [{ data: prof }, { data: cls }] = await Promise.all([
-      supabase.from('users').select('*').eq('id', user.id).single(),
-      supabase.from('clients').select('*').order('name'),
-    ])
-    setProfile(prof)
-    setClients(cls || [])
-    setLoading(false)
+    try {
+      const cls = await getClients()
+      setClients(cls)
+    } catch (err) {
+      toast.error('Failed to load clients')
+    } finally {
+      setLoading(false)
+    }
   }
 
   function openAdd() {
@@ -63,21 +56,22 @@ export default function ClientsPage() {
   async function handleSave() {
     if (!form.name.trim()) { toast.error('Name is required'); return }
     setSaving(true)
-    if (editing) {
-      const { error } = await supabase.from('clients').update(form).eq('id', editing.id)
-      if (error) { toast.error(error.message); setSaving(false); return }
-      toast.success('Client updated')
-    } else {
-      const { error } = await supabase.from('clients').insert(form)
-      if (error) { toast.error(error.message); setSaving(false); return }
-      toast.success('Client added')
+    try {
+      if (editing) {
+        await updateClient(editing.id, form)
+        toast.success('Client updated')
+      } else {
+        await createClient(form)
+        toast.success('Client added')
+      }
+      setModalOpen(false)
+      await load()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
-    setModalOpen(false)
-    load()
   }
-
-  const isAdmin = profile?.role === 'admin'
 
   return (
     <div>

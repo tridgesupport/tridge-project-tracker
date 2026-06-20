@@ -1,8 +1,4 @@
-import { createBrowserClient } from '@supabase/ssr'
-
+// Supabase removed — using Neon + NextAuth
 export function createClient() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  throw new Error('Supabase has been removed. Use lib/api.ts or NextAuth instead.')
 }

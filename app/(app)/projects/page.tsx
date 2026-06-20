@@ -2,25 +2,17 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase'
+import { useSession } from 'next-auth/react'
 import type { Project, User, Client, ProjectStatus, ProjectType } from '@/types'
+import { getProjects, getClients, getUsers, updateProject } from '@/lib/api'
 import { StatusBadge } from '@/components/StatusBadge'
 import { buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { DatePicker } from '@/components/DatePicker'
 import { Plus, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
@@ -78,9 +70,8 @@ function SortHead({ label, field, sort, onSort, className }: {
 type EditingCell = { projectId: string; field: string; textValue: string }
 
 export default function ProjectsPage() {
-  const supabase = createClient()
+  const { data: session } = useSession()
   const [projects, setProjects] = useState<Project[]>([])
-  const [profile, setProfile] = useState<User | null>(null)
   const [clients, setClients] = useState<Client[]>([])
   const [internalUsers, setInternalUsers] = useState<User[]>([])
   const [statusFilter, setStatusFilter] = useState(ALL)
@@ -88,6 +79,13 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true)
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
   const [sort, setSort] = useState<SortState | null>(null)
+
+  const profile = session?.user ? {
+    id: session.user.id,
+    name: session.user.name || '',
+    email: session.user.email || '',
+    role: (session.user as unknown as Record<string, string>).role || 'internal',
+  } : null
 
   function toggleSort(field: string) {
     setSort(s => s?.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
@@ -112,39 +110,16 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const [{ data: prof }, { data: cls }, { data: usrs }] = await Promise.all([
-        supabase.from('users').select('*').eq('id', user.id).single(),
-        supabase.from('clients').select('*').order('name'),
-        supabase.from('users').select('*').order('name'),
-      ])
-
-      setProfile(prof)
-      setClients(cls || [])
-      setInternalUsers((usrs || []).filter((u: User) => u.role !== 'client'))
-
-      let query = supabase
-        .from('projects')
-        .select(`
-          *,
-          owner:users!projects_owner_id_fkey(id,name,email),
-          customer:clients(id,name),
-          next_action_by_user:users!projects_next_action_by_fkey(id,name,email),
-          last_edited_by_user:users!projects_last_edited_by_fkey(id,name,email)
-        `)
-        .order('created_at', { ascending: false })
-
-      if (prof?.role === 'client') {
-        const { data: clientRec } = await supabase
-          .from('clients').select('id').eq('email', user.email).single()
-        if (clientRec) query = query.eq('customer_id', clientRec.id)
+      try {
+        const [projs, cls, usrs] = await Promise.all([getProjects(), getClients(), getUsers()])
+        setProjects(projs)
+        setClients(cls)
+        setInternalUsers(usrs.filter(u => u.role !== 'client'))
+      } catch (err) {
+        toast.error('Failed to load data')
+      } finally {
+        setLoading(false)
       }
-
-      const { data } = await query
-      setProjects(data || [])
-      setLoading(false)
     }
     load()
   }, [])
@@ -172,39 +147,34 @@ export default function ProjectsPage() {
     if (!profile) return
     const project = projects.find(p => p.id === projectId)
     if (!project) return
-
     setEditingCell(null)
 
     const now = new Date().toISOString()
-    const { error } = await supabase.from('projects').update({
-      [field]: value,
-      last_edited_by: profile.id,
-      last_edited_at: now,
-    }).eq('id', projectId)
+    const changes = { [field]: { old: (project as any)[field], new: value } }
 
-    if (error) { toast.error('Save failed: ' + error.message); return }
-
-    supabase.from('edit_log').insert({
-      entity_type: 'project', entity_id: projectId,
-      edited_by_email: profile.email, edited_at: now,
-      changes: { [field]: { old: (project as any)[field], new: value } },
-    }).then(() => {})
-
+    let notifyEmail: string | null = null
+    let notifyName: string | null = null
     if (field === 'next_action_by' && value && value !== project.next_action_by) {
       const assignee = internalUsers.find(u => u.id === value)
-      if (assignee) {
-        fetch('/api/send-email', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            toEmail: assignee.email, toName: assignee.name, entityType: 'Project',
-            entityName: project.project_name, projectName: project.project_name,
-            appUrl: `${window.location.origin}/projects/${projectId}`,
-          }),
-        }).catch(() => {})
-      }
+      if (assignee) { notifyEmail = assignee.email; notifyName = assignee.name }
     }
 
-    // Optimistic local update — also resolve relation display fields
+    try {
+      await updateProject(projectId, {
+        [field]: value,
+        last_edited_by: profile.id,
+        last_edited_at: now,
+        _changes: changes,
+        _editedByEmail: profile.email,
+        _notifyEmail: notifyEmail,
+        _notifyName: notifyName,
+        _projectName: project.project_name,
+      })
+    } catch (err: any) {
+      toast.error('Save failed: ' + err.message)
+      return
+    }
+
     const patch: Record<string, unknown> = {
       [field]: value,
       last_edited_by: profile.id,
@@ -287,13 +257,10 @@ export default function ProjectsPage() {
             <TableBody>
               {sorted.map(p => (
                 <TableRow key={p.id} className="hover:bg-muted/50">
-
-                  {/* Project Name — pencil on hover to edit, link to navigate */}
                   <TableCell className="font-medium">
                     {isEditing(p.id, 'project_name') ? (
                       <Input
-                        autoFocus
-                        className="h-7 text-sm min-w-[180px]"
+                        autoFocus className="h-7 text-sm min-w-[180px]"
                         value={editingCell!.textValue}
                         onChange={e => setEditingCell(c => c ? { ...c, textValue: e.target.value } : null)}
                         onBlur={() => commitText(p.id, 'project_name')}
@@ -304,197 +271,117 @@ export default function ProjectsPage() {
                       />
                     ) : (
                       <div className="flex items-center gap-1.5 group">
-                        <Link
-                          href={`/projects/${p.id}`}
-                          className="text-primary hover:underline"
-                          onClick={e => e.stopPropagation()}
-                        >
+                        <Link href={`/projects/${p.id}`} className="text-primary hover:underline"
+                          onClick={e => e.stopPropagation()}>
                           {p.project_name}
                         </Link>
                         {canEdit && (
-                          <Pencil
-                            size={11}
+                          <Pencil size={11}
                             className="text-muted-foreground opacity-0 group-hover:opacity-100 cursor-pointer shrink-0"
-                            onClick={e => startTextEdit(e, p.id, 'project_name', p.project_name)}
-                          />
+                            onClick={e => startTextEdit(e, p.id, 'project_name', p.project_name)} />
                         )}
                       </div>
                     )}
                   </TableCell>
 
-                  {/* Customer */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer' : ''}
-                    onClick={e => startSelectEdit(e, p.id, 'customer_id')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer' : ''} onClick={e => startSelectEdit(e, p.id, 'customer_id')}>
                     {isEditing(p.id, 'customer_id') ? (
-                      <Select
-                        open
-                        onOpenChange={open => { if (!open) setEditingCell(null) }}
+                      <Select open onOpenChange={open => { if (!open) setEditingCell(null) }}
                         value={(p as any).customer_id ?? NONE}
-                        onValueChange={v => saveEdit(p.id, 'customer_id', v === NONE ? null : v)}
-                      >
+                        onValueChange={v => saveEdit(p.id, 'customer_id', v === NONE ? null : v)}>
                         <SelectTrigger className="h-7 text-xs min-w-[140px]"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value={NONE}>— None —</SelectItem>
                           {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                    ) : (
-                      <span className="text-sm">{(p as any).customer?.name || '—'}</span>
-                    )}
+                    ) : <span className="text-sm">{(p as any).customer?.name || '—'}</span>}
                   </TableCell>
 
-                  {/* Owner */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer' : ''}
-                    onClick={e => startSelectEdit(e, p.id, 'owner_id')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer' : ''} onClick={e => startSelectEdit(e, p.id, 'owner_id')}>
                     {isEditing(p.id, 'owner_id') ? (
-                      <Select
-                        open
-                        onOpenChange={open => { if (!open) setEditingCell(null) }}
+                      <Select open onOpenChange={open => { if (!open) setEditingCell(null) }}
                         value={(p as any).owner_id ?? NONE}
-                        onValueChange={v => saveEdit(p.id, 'owner_id', v === NONE ? null : v)}
-                      >
+                        onValueChange={v => saveEdit(p.id, 'owner_id', v === NONE ? null : v)}>
                         <SelectTrigger className="h-7 text-xs min-w-[140px]"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value={NONE}>— None —</SelectItem>
                           {internalUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                    ) : (
-                      <span className="text-sm">{(p as any).owner?.name || '—'}</span>
-                    )}
+                    ) : <span className="text-sm">{(p as any).owner?.name || '—'}</span>}
                   </TableCell>
 
-                  {/* Type */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'}
-                    onClick={e => startSelectEdit(e, p.id, 'project_type')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startSelectEdit(e, p.id, 'project_type')}>
                     {isEditing(p.id, 'project_type') ? (
-                      <Select
-                        open
-                        onOpenChange={open => { if (!open) setEditingCell(null) }}
-                        value={p.project_type}
-                        onValueChange={v => saveEdit(p.id, 'project_type', v)}
-                      >
+                      <Select open onOpenChange={open => { if (!open) setEditingCell(null) }}
+                        value={p.project_type} onValueChange={v => saveEdit(p.id, 'project_type', v)}>
                         <SelectTrigger className="h-7 text-xs min-w-[140px]"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {PROJECT_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                    ) : (
-                      p.project_type
-                    )}
+                    ) : p.project_type}
                   </TableCell>
 
-                  {/* Status */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer' : ''}
-                    onClick={e => startSelectEdit(e, p.id, 'status')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer' : ''} onClick={e => startSelectEdit(e, p.id, 'status')}>
                     {isEditing(p.id, 'status') ? (
-                      <Select
-                        open
-                        onOpenChange={open => { if (!open) setEditingCell(null) }}
-                        value={p.status}
-                        onValueChange={v => saveEdit(p.id, 'status', v)}
-                      >
+                      <Select open onOpenChange={open => { if (!open) setEditingCell(null) }}
+                        value={p.status} onValueChange={v => saveEdit(p.id, 'status', v)}>
                         <SelectTrigger className="h-7 text-xs min-w-[160px]"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {PROJECT_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                    ) : (
-                      <StatusBadge status={p.status} />
-                    )}
+                    ) : <StatusBadge status={p.status} />}
                   </TableCell>
 
-                  {/* Priority */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'}
-                    onClick={e => startSelectEdit(e, p.id, 'priority')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startSelectEdit(e, p.id, 'priority')}>
                     {isEditing(p.id, 'priority') ? (
-                      <Select
-                        open
-                        onOpenChange={open => { if (!open) setEditingCell(null) }}
+                      <Select open onOpenChange={open => { if (!open) setEditingCell(null) }}
                         value={p.priority !== null ? String(p.priority) : NONE}
-                        onValueChange={v => saveEdit(p.id, 'priority', v === NONE ? null : Number(v))}
-                      >
+                        onValueChange={v => saveEdit(p.id, 'priority', v === NONE ? null : Number(v))}>
                         <SelectTrigger className="h-7 text-xs w-20"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value={NONE}>— None —</SelectItem>
                           {PRIORITY_OPTIONS.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                    ) : (
-                      p.priority ?? '—'
-                    )}
+                    ) : p.priority ?? '—'}
                   </TableCell>
 
-                  {/* Start date */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'}
-                    onClick={e => startSelectEdit(e, p.id, 'expected_start_date')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startSelectEdit(e, p.id, 'expected_start_date')}>
                     {isEditing(p.id, 'expected_start_date') ? (
                       <div onClick={e => e.stopPropagation()}>
-                        <DatePicker
-                          autoOpen
-                          value={p.expected_start_date}
-                          onChange={v => saveEdit(p.id, 'expected_start_date', v)}
-                        />
+                        <DatePicker autoOpen value={p.expected_start_date}
+                          onChange={v => saveEdit(p.id, 'expected_start_date', v)} />
                       </div>
-                    ) : (
-                      fmtDate(p.expected_start_date)
-                    )}
+                    ) : fmtDate(p.expected_start_date)}
                   </TableCell>
 
-                  {/* End date */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'}
-                    onClick={e => startSelectEdit(e, p.id, 'expected_end_date')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startSelectEdit(e, p.id, 'expected_end_date')}>
                     {isEditing(p.id, 'expected_end_date') ? (
                       <div onClick={e => e.stopPropagation()}>
-                        <DatePicker
-                          autoOpen
-                          value={p.expected_end_date}
-                          onChange={v => saveEdit(p.id, 'expected_end_date', v)}
-                        />
+                        <DatePicker autoOpen value={p.expected_end_date}
+                          onChange={v => saveEdit(p.id, 'expected_end_date', v)} />
                       </div>
-                    ) : (
-                      fmtDate(p.expected_end_date)
-                    )}
+                    ) : fmtDate(p.expected_end_date)}
                   </TableCell>
 
-                  {/* Next Action By */}
-                  <TableCell
-                    className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'}
-                    onClick={e => startSelectEdit(e, p.id, 'next_action_by')}
-                  >
+                  <TableCell className={canEdit ? 'cursor-pointer text-xs' : 'text-xs'} onClick={e => startSelectEdit(e, p.id, 'next_action_by')}>
                     {isEditing(p.id, 'next_action_by') ? (
-                      <Select
-                        open
-                        onOpenChange={open => { if (!open) setEditingCell(null) }}
+                      <Select open onOpenChange={open => { if (!open) setEditingCell(null) }}
                         value={(p as any).next_action_by ?? NONE}
-                        onValueChange={v => saveEdit(p.id, 'next_action_by', v === NONE ? null : v)}
-                      >
+                        onValueChange={v => saveEdit(p.id, 'next_action_by', v === NONE ? null : v)}>
                         <SelectTrigger className="h-7 text-xs min-w-[140px]"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value={NONE}>— None —</SelectItem>
                           {internalUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                    ) : (
-                      (p as any).next_action_by_user?.name || '—'
-                    )}
+                    ) : (p as any).next_action_by_user?.name || '—'}
                   </TableCell>
 
-                  {/* Read-only metadata */}
                   <TableCell className="text-xs">{(p as any).last_edited_by_user?.name || '—'}</TableCell>
                   <TableCell className="text-xs">{p.last_edited_at ? fmtDate(p.last_edited_at) : '—'}</TableCell>
                 </TableRow>
