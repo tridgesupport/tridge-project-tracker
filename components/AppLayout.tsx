@@ -3,7 +3,9 @@
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { useSession, signOut } from 'next-auth/react'
+import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
+import { credentialsSignOut } from '@/app/actions/auth'
 import type { User } from '@/types'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
@@ -49,6 +51,7 @@ function NavLinks({ role, pathname, onClick }: { role: string; pathname: string;
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const { data: session } = useSession()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [changePwOpen, setChangePwOpen] = useState(false)
@@ -65,7 +68,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   } as User : null
 
   async function handleSignOut() {
-    await signOut({ callbackUrl: '/login' })
+    await credentialsSignOut()
+    router.push('/login')
+    router.refresh()
   }
 
   async function handleChangePassword() {

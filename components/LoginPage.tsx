@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { signIn } from 'next-auth/react'
+import { credentialsSignIn } from '@/app/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,12 +36,17 @@ export default function LoginPage() {
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    const result = await signIn('credentials', { email, password, redirect: false })
-    if (result?.error) {
-      toast.error('Invalid email or password')
-    } else {
-      router.push('/projects')
-      router.refresh()
+    try {
+      const result = await credentialsSignIn(email, password)
+      if (result.ok) {
+        router.push('/projects')
+        router.refresh()
+      } else {
+        toast.error('Invalid email or password')
+      }
+    } catch (err: any) {
+      console.error('Sign-in exception:', err)
+      toast.error('Sign-in error: ' + (err?.message || 'Unknown error'))
     }
     setLoading(false)
   }
@@ -66,13 +71,13 @@ export default function LoginPage() {
       return
     }
 
-    const result = await signIn('credentials', { email, password, redirect: false })
-    if (result?.error) {
-      toast.success('Account created! Please sign in.')
-      switchTo('login')
-    } else {
+    const result = await credentialsSignIn(email, password)
+    if (result.ok) {
       router.push('/projects')
       router.refresh()
+    } else {
+      toast.success('Account created! Please sign in.')
+      switchTo('login')
     }
     setLoading(false)
   }
