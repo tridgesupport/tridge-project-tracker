@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
-import { Resend } from 'resend'
+import { sendEmail } from '@/lib/brevo'
 import { randomUUID } from 'crypto'
 
 export async function POST(req: Request) {
@@ -19,9 +19,7 @@ export async function POST(req: Request) {
   const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL}/auth/reset-password?token=${token}`
 
   try {
-    const resend = new Resend(process.env.RESEND_API_KEY)
-    await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'noreply@tridge.co.in',
+    await sendEmail({
       to: email,
       subject: 'Reset your Tridge Tracker password',
       html: `<p>Click the link below to reset your password. This link expires in 1 hour.</p>

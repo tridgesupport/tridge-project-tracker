@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Menu, FolderKanban, Users, Settings, LogOut, KeyRound } from 'lucide-react'
+import { Menu, FolderKanban, Users, Settings, LogOut, KeyRound, Receipt } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -28,7 +28,10 @@ const navItems = [
   { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/clients', label: 'Clients', icon: Users },
 ]
-const adminNavItems = [{ href: '/admin', label: 'Admin', icon: Settings }]
+const adminNavItems = [
+  { href: '/invoices', label: 'Invoices', icon: Receipt },
+  { href: '/admin', label: 'Admin', icon: Settings },
+]
 
 function NavLinks({ role, pathname, onClick }: { role: string; pathname: string; onClick?: () => void }) {
   const items = role === 'admin' ? [...navItems, ...adminNavItems] : navItems

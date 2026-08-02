@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { sql } from '@/lib/db'
-import { Resend } from 'resend'
+import { sendEmail } from '@/lib/brevo'
 import { randomUUID } from 'crypto'
 
 export async function POST(req: Request) {
@@ -21,9 +21,7 @@ export async function POST(req: Request) {
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/invite/${token}`
 
   try {
-    const resend = new Resend(process.env.RESEND_API_KEY)
-    await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'noreply@tridge.co.in',
+    await sendEmail({
       to: email,
       subject: "You've been invited to Tridge Project Tracker",
       html: `<p>Hi${name ? ` ${name}` : ''},</p>

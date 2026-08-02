@@ -19,8 +19,16 @@ export async function POST(req: Request) {
   if (!body.name?.trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
 
   const rows = await sql`
-    INSERT INTO clients (name, contact, email)
-    VALUES (${body.name.trim()}, ${body.contact ?? null}, ${body.email ?? null})
+    INSERT INTO clients (
+      name, contact, email, invoice_to_name, invoice_address, gstin, amount,
+      description_label, invoice_to_email, invoice_cc_emails, client_number, auto_invoice_active
+    )
+    VALUES (
+      ${body.name.trim()}, ${body.contact ?? null}, ${body.email ?? null},
+      ${body.invoice_to_name ?? null}, ${body.invoice_address ?? null}, ${body.gstin ?? null},
+      ${body.amount ?? null}, ${body.description_label ?? 'AMC'}, ${body.invoice_to_email ?? null},
+      ${body.invoice_cc_emails ?? null}, ${body.client_number ?? null}, ${body.auto_invoice_active ?? false}
+    )
     RETURNING *`
   return NextResponse.json(rows[0])
 }

@@ -14,7 +14,8 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/api/register') ||
     pathname.startsWith('/api/forgot-password') ||
     pathname.startsWith('/api/change-password') ||
-    pathname.startsWith('/auth/reset-password')
+    pathname.startsWith('/auth/reset-password') ||
+    pathname.startsWith('/api/cron/') // authenticated separately via CRON_SECRET, not a session cookie
 
   if (isPublic) return NextResponse.next()
 

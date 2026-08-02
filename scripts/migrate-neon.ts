@@ -56,6 +56,46 @@ async function migrate() {
     )`
   console.log('✓ password_reset_tokens table')
 
+  // Invoicing: billing profile columns on clients
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS invoice_to_name text`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS invoice_address text`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS gstin text`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS amount numeric(12,2)`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS description_label text NOT NULL DEFAULT 'AMC'`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS invoice_to_email text`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS invoice_cc_emails text`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS client_number integer UNIQUE`
+  await sql`ALTER TABLE clients ADD COLUMN IF NOT EXISTS auto_invoice_active boolean NOT NULL DEFAULT false`
+  console.log('✓ clients invoicing columns')
+
+  // Invoices table
+  await sql`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      client_id uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      invoice_number text NOT NULL UNIQUE,
+      fy_code text NOT NULL,
+      client_number integer NOT NULL,
+      sequence_in_fy integer NOT NULL,
+      period_month integer NOT NULL,
+      period_year integer NOT NULL,
+      amount numeric(12,2) NOT NULL,
+      description text NOT NULL,
+      invoice_to_name text NOT NULL,
+      invoice_address text,
+      gstin text,
+      to_email text,
+      cc_emails text,
+      invoice_date date NOT NULL,
+      status text NOT NULL CHECK (status IN ('sent', 'failed')),
+      error_message text,
+      sent_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (client_id, period_year, period_month)
+    )`
+  await sql`CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id)`
+  console.log('✓ invoices table')
+
   console.log('\nAll migrations complete!')
 }
 

@@ -1,4 +1,4 @@
-import type { Project, Milestone, Task, Client, User, EditLog, Comment } from '@/types'
+import type { Project, Milestone, Task, Client, User, EditLog, Comment, Invoice } from '@/types'
 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -52,3 +52,10 @@ export const getComments = (entityIds: string[]) =>
   apiFetch<Comment[]>(`/api/db/comments?entity_ids=${entityIds.join(',')}`)
 export const createComment = (data: Record<string, unknown>) =>
   apiFetch<Comment>('/api/db/comments', { method: 'POST', body: JSON.stringify(data) })
+
+export const getInvoices = () => apiFetch<(Invoice & { client_name: string })[]>('/api/db/invoices')
+export const resendInvoice = (clientId: string, period?: { periodMonth: number; periodYear: number }) =>
+  apiFetch<{ outcome: string }>(`/api/invoices/${clientId}/resend`, {
+    method: 'POST',
+    body: JSON.stringify(period || {}),
+  })

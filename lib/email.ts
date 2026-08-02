@@ -1,4 +1,4 @@
-import { Resend } from 'resend'
+import { sendEmail } from '@/lib/brevo'
 
 export async function sendNextActionEmail({
   toEmail,
@@ -15,9 +15,7 @@ export async function sendNextActionEmail({
   projectName: string
   appUrl: string
 }) {
-  const resend = new Resend(process.env.RESEND_API_KEY)
-  await resend.emails.send({
-    from: process.env.EMAIL_FROM || 'noreply@tridge.co.in',
+  await sendEmail({
     to: toEmail,
     subject: `Action required: ${entityName}`,
     html: `

@@ -40,6 +40,39 @@ export interface Client {
   contact: string
   email: string
   created_at: string
+  invoice_to_name: string | null
+  invoice_address: string | null
+  gstin: string | null
+  amount: number | null
+  description_label: string
+  invoice_to_email: string | null
+  invoice_cc_emails: string | null
+  client_number: number | null
+  auto_invoice_active: boolean
+}
+
+export interface Invoice {
+  id: string
+  client_id: string
+  invoice_number: string
+  fy_code: string
+  client_number: number
+  sequence_in_fy: number
+  period_month: number
+  period_year: number
+  amount: number
+  description: string
+  invoice_to_name: string
+  invoice_address: string | null
+  gstin: string | null
+  to_email: string | null
+  cc_emails: string | null
+  invoice_date: string
+  status: 'sent' | 'failed'
+  error_message: string | null
+  sent_at: string | null
+  created_at: string
+  client?: Client
 }
 
 export interface Project {
