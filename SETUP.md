@@ -2,26 +2,20 @@
 
 ## Prerequisites
 - Node.js 18+
-- A Supabase project
+- A Neon (Postgres) project
 - A Resend account (for email notifications)
 
-## 1. Supabase Setup
+## 1. Neon Setup
 
-### Create the database tables
-1. Go to your Supabase dashboard → SQL Editor
-2. Paste and run the entire contents of `supabase/migration.sql`
-3. This creates all tables, triggers, RLS policies, and indexes
+### Create the database schema
+1. Set `DATABASE_URL` in `.env.local` to your Neon connection string
+2. Run `npx tsx scripts/migrate-neon.ts` to create/update tables
 
-### Configure Auth
-- Enable **Email/Password** auth in Authentication → Providers
-- (Optional) Set up a custom SMTP server in Authentication → SMTP Settings for transactional emails
+### Auth
+Auth is handled by NextAuth v5 with the Credentials provider — passwords are hashed with `bcryptjs` and checked against the `users` table via `lib/db.ts`. No external auth provider is required.
 
 ### Create the first admin user
-1. Go to Authentication → Users → Create user
-2. After creation, run this in the SQL editor (replace the email):
-   ```sql
-   UPDATE public.users SET role = 'admin', name = 'Your Name' WHERE email = 'admin@yourcompany.com';
-   ```
+Run `npx tsx scripts/create-admin.ts` (see the script for required env vars/args).
 
 ## 2. Environment Variables
 
@@ -33,9 +27,8 @@ cp .env.example .env.local
 
 | Variable | Where to find it |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase dashboard → Settings → API → Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase dashboard → Settings → API → anon/public key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → Settings → API → service_role key |
+| `DATABASE_URL` | Neon dashboard → Connection Details → connection string |
+| `AUTH_SECRET` | Generate with `npx auth secret` (NextAuth v5) |
 | `RESEND_API_KEY` | Resend dashboard → API Keys |
 | `EMAIL_FROM` | A verified domain email in Resend (e.g. `noreply@yourcompany.com`) |
 | `NEXT_PUBLIC_APP_URL` | Your deployment URL (e.g. `https://tracker.yourcompany.com`) |
