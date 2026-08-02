@@ -4,52 +4,55 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import type { Client, Invoice } from '@/types'
-import { getClients, updateClient, getInvoices, resendInvoice } from '@/lib/api'
+import { getClients, getInvoices, createInvoice, sendInvoiceNow, cancelInvoice } from '@/lib/api'
+import { monthLabel } from '@/lib/invoice-number'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { DatePicker } from '@/components/DatePicker'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { toast } from 'sonner'
-import { Pencil, Eye, Send } from 'lucide-react'
+import { Plus, Eye, Send, X } from 'lucide-react'
 
-type BillingForm = {
-  invoice_to_name: string
-  invoice_address: string
-  gstin: string
-  amount: string
-  description_label: string
-  invoice_to_email: string
-  invoice_cc_emails: string
-  client_number: string
-  auto_invoice_active: boolean
+type InvoiceWithClient = Invoice & { client_name: string }
+
+const statusStyles: Record<string, string> = {
+  scheduled: 'bg-amber-100 text-amber-700',
+  sent: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
 }
 
-const emptyForm: BillingForm = {
-  invoice_to_name: '', invoice_address: '', gstin: '', amount: '',
-  description_label: 'AMC', invoice_to_email: '', invoice_cc_emails: '',
-  client_number: '', auto_invoice_active: false,
+function defaultDescription(client: Client) {
+  const now = new Date()
+  return `${client.description_label || 'AMC'} for ${monthLabel(now.getMonth() + 1, now.getFullYear())}`
 }
 
 export default function InvoicesPage() {
   const { data: session } = useSession()
   const router = useRouter()
   const [clients, setClients] = useState<Client[]>([])
-  const [invoices, setInvoices] = useState<(Invoice & { client_name: string })[]>([])
+  const [invoices, setInvoices] = useState<InvoiceWithClient[]>([])
   const [loading, setLoading] = useState(true)
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState<Client | null>(null)
-  const [form, setForm] = useState<BillingForm>(emptyForm)
-  const [saving, setSaving] = useState(false)
-  const [sendingId, setSendingId] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [clientId, setClientId] = useState('')
+  const [description, setDescription] = useState('')
+  const [amount, setAmount] = useState('')
+  const [sendMode, setSendMode] = useState<'now' | 'schedule'>('now')
+  const [scheduledDate, setScheduledDate] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   const role = (session?.user as unknown as Record<string, string>)?.role
+  const selectedClient = clients.find(c => c.id === clientId) || null
 
   useEffect(() => {
     if (!session) return
@@ -67,246 +70,227 @@ export default function InvoicesPage() {
     }
   }
 
-  function openEdit(c: Client) {
-    setEditing(c)
-    setForm({
-      invoice_to_name: c.invoice_to_name || c.name,
-      invoice_address: c.invoice_address || '',
-      gstin: c.gstin || '',
-      amount: c.amount != null ? String(c.amount) : '',
-      description_label: c.description_label || 'AMC',
-      invoice_to_email: c.invoice_to_email || c.email || '',
-      invoice_cc_emails: c.invoice_cc_emails || '',
-      client_number: c.client_number != null ? String(c.client_number) : '',
-      auto_invoice_active: c.auto_invoice_active,
-    })
-    setModalOpen(true)
+  function openCreate() {
+    setClientId('')
+    setDescription('')
+    setAmount('')
+    setSendMode('now')
+    setScheduledDate(null)
+    setCreateOpen(true)
   }
 
-  async function handleSave() {
-    if (!editing) return
-    setSaving(true)
+  function handleClientChange(id: string | null) {
+    setClientId(id || '')
+    const c = clients.find(x => x.id === id)
+    if (c) {
+      setDescription(defaultDescription(c))
+      setAmount(c.amount != null ? String(c.amount) : '')
+    }
+  }
+
+  function previewDraft() {
+    if (!clientId) return
+    const params = new URLSearchParams({ amount: amount || '0', description: description || '' })
+    window.open(`/api/invoices/client/${clientId}/preview?${params.toString()}`, '_blank')
+  }
+
+  async function handleCreate() {
+    if (!clientId) { toast.error('Pick a client'); return }
+    if (!description.trim()) { toast.error('Description is required'); return }
+    if (!amount || Number(amount) <= 0) { toast.error('Amount is required'); return }
+    if (sendMode === 'schedule' && !scheduledDate) { toast.error('Pick a date to schedule for'); return }
+
+    setCreating(true)
     try {
-      await updateClient(editing.id, {
-        invoice_to_name: form.invoice_to_name.trim() || null,
-        invoice_address: form.invoice_address.trim() || null,
-        gstin: form.gstin.trim() || null,
-        amount: form.amount ? Number(form.amount) : null,
-        description_label: form.description_label.trim() || 'AMC',
-        invoice_to_email: form.invoice_to_email.trim() || null,
-        invoice_cc_emails: form.invoice_cc_emails.trim() || null,
-        client_number: form.client_number ? Number(form.client_number) : null,
-        auto_invoice_active: form.auto_invoice_active,
+      await createInvoice({
+        clientId,
+        description: description.trim(),
+        amount: Number(amount),
+        sendNow: sendMode === 'now',
+        scheduledDate: sendMode === 'schedule' ? scheduledDate! : undefined,
       })
-      toast.success('Billing profile saved')
-      setModalOpen(false)
+      toast.success(sendMode === 'now' ? 'Invoice sent' : 'Invoice scheduled')
+      setCreateOpen(false)
       await load()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Request failed')
     } finally {
-      setSaving(false)
+      setCreating(false)
     }
   }
 
-  function previewPdf(clientId: string) {
-    window.open(`/api/invoices/${clientId}/preview`, '_blank')
-  }
-
-  async function sendNow(client: Client) {
-    if (!client.amount || !client.client_number) {
-      toast.error('Set amount and client # before sending')
-      return
-    }
-    setSendingId(client.id)
+  async function handleSendNow(inv: InvoiceWithClient) {
+    setBusyId(inv.id)
     try {
-      const result = await resendInvoice(client.id)
-      if (result.outcome === 'skipped') toast.info('Already invoiced for this period')
-      else toast.success('Invoice sent')
+      await sendInvoiceNow(inv.id)
+      toast.success('Invoice sent')
       await load()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Request failed')
     } finally {
-      setSendingId(null)
+      setBusyId(null)
     }
   }
 
-  async function resendHistoryRow(inv: Invoice) {
-    setSendingId(inv.id)
+  async function handleCancel(inv: InvoiceWithClient) {
+    if (!confirm(`Cancel scheduled invoice ${inv.invoice_number}?`)) return
+    setBusyId(inv.id)
     try {
-      await resendInvoice(inv.client_id, { periodMonth: inv.period_month, periodYear: inv.period_year })
-      toast.success('Invoice resent')
+      await cancelInvoice(inv.id)
+      toast.success('Invoice cancelled')
       await load()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Request failed')
     } finally {
-      setSendingId(null)
+      setBusyId(null)
     }
+  }
+
+  function previewInvoice(inv: InvoiceWithClient) {
+    window.open(`/api/invoices/${inv.id}/preview`, '_blank')
   }
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>
 
   return (
-    <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-xl font-semibold mb-1">Invoices</h1>
-        <p className="text-sm text-muted-foreground mb-6">
-          Clients marked Active are billed automatically on the 30th of every month.
-        </p>
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-xl font-semibold">Invoices</h1>
+        <Button onClick={openCreate}><Plus size={16} className="mr-1" />Create Invoice</Button>
+      </div>
+      <p className="text-sm text-muted-foreground mb-6">
+        Pick a client to autofill their billing details, then send now or schedule for a date.
+        Clients marked Active on the Clients tab are also billed automatically on the 30th of every month.
+      </p>
 
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Client</TableHead>
-                <TableHead>Client #</TableHead>
-                <TableHead>Amount (INR)</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Invoice Email</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-32" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {clients.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-sm text-muted-foreground">No clients yet — add one on the Clients tab first.</TableCell></TableRow>
-              ) : clients.map(c => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-medium">{c.name}</TableCell>
-                  <TableCell>{c.client_number ?? '—'}</TableCell>
-                  <TableCell>{c.amount != null ? Number(c.amount).toFixed(2) : '—'}</TableCell>
-                  <TableCell>{c.description_label}</TableCell>
-                  <TableCell>{c.invoice_to_email || c.email || '—'}</TableCell>
-                  <TableCell>
-                    <Badge className={c.auto_invoice_active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}>
-                      {c.auto_invoice_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(c)} title="Edit billing profile">
-                        <Pencil size={14} />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => previewPdf(c.id)} title="Preview PDF">
-                        <Eye size={14} />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => sendNow(c)}
-                        disabled={sendingId === c.id} title="Send this month's invoice now">
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Invoice #</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead>Amount</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-24" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {invoices.length === 0 ? (
+              <TableRow><TableCell colSpan={7} className="text-sm text-muted-foreground">No invoices yet.</TableCell></TableRow>
+            ) : invoices.map(inv => (
+              <TableRow key={inv.id}>
+                <TableCell className="font-medium">{inv.invoice_number}</TableCell>
+                <TableCell>{inv.client_name}</TableCell>
+                <TableCell className="max-w-xs truncate">{inv.description}</TableCell>
+                <TableCell>{Number(inv.amount).toFixed(2)}</TableCell>
+                <TableCell>{new Date(inv.scheduled_date || inv.invoice_date).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  <Badge className={statusStyles[inv.status] || ''}>{inv.status}</Badge>
+                  {inv.status === 'failed' && inv.error_message && (
+                    <div className="text-xs text-muted-foreground mt-1 max-w-xs">{inv.error_message}</div>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => previewInvoice(inv)} title="Preview PDF">
+                      <Eye size={14} />
+                    </Button>
+                    {(inv.status === 'scheduled' || inv.status === 'failed') && (
+                      <Button variant="ghost" size="icon" onClick={() => handleSendNow(inv)}
+                        disabled={busyId === inv.id} title="Send now">
                         <Send size={14} />
                       </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold mb-3">Sent Invoices</h2>
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice #</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Period</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Sent At</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-16" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {invoices.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-sm text-muted-foreground">No invoices sent yet.</TableCell></TableRow>
-              ) : invoices.map(inv => (
-                <TableRow key={inv.id}>
-                  <TableCell className="font-medium">{inv.invoice_number}</TableCell>
-                  <TableCell>{inv.client_name}</TableCell>
-                  <TableCell>{inv.period_month}/{inv.period_year}</TableCell>
-                  <TableCell>{Number(inv.amount).toFixed(2)}</TableCell>
-                  <TableCell>{inv.sent_at ? new Date(inv.sent_at).toLocaleString() : '—'}</TableCell>
-                  <TableCell>
-                    <Badge className={inv.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
-                      {inv.status}
-                    </Badge>
-                    {inv.status === 'failed' && inv.error_message && (
-                      <div className="text-xs text-muted-foreground mt-1 max-w-xs">{inv.error_message}</div>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => resendHistoryRow(inv)}
-                      disabled={sendingId === inv.id} title="Resend this invoice">
-                      <Send size={14} />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+                    {inv.status === 'scheduled' && (
+                      <Button variant="ghost" size="icon" onClick={() => handleCancel(inv)}
+                        disabled={busyId === inv.id} title="Cancel">
+                        <X size={14} />
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
 
-      <Dialog open={modalOpen} onOpenChange={v => !v && setModalOpen(false)}>
+      <Dialog open={createOpen} onOpenChange={v => !v && setCreateOpen(false)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Billing Profile — {editing?.name}</DialogTitle>
+            <DialogTitle>Create Invoice</DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col gap-3 py-2 max-h-[70vh] overflow-y-auto">
+          <div className="flex flex-col gap-3 py-2">
             <div className="flex flex-col gap-1.5">
-              <Label>Bill-to Name</Label>
-              <Input value={form.invoice_to_name}
-                onChange={e => setForm(f => ({ ...f, invoice_to_name: e.target.value }))} />
+              <Label>Client</Label>
+              <Select value={clientId} onValueChange={handleClientChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a client">
+                    {(value: string | null) => clients.find(c => c.id === value)?.name || 'Select a client'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Bill-to Address</Label>
-              <Textarea rows={4} value={form.invoice_address}
-                onChange={e => setForm(f => ({ ...f, invoice_address: e.target.value }))} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>GST Number</Label>
-              <Input value={form.gstin} onChange={e => setForm(f => ({ ...f, gstin: e.target.value }))} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label>Amount (INR)</Label>
-                <Input type="number" value={form.amount}
-                  onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+
+            {selectedClient && (
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                <div className="font-medium">{selectedClient.invoice_to_name || selectedClient.name}</div>
+                {selectedClient.invoice_address && (
+                  <div className="text-muted-foreground whitespace-pre-line">{selectedClient.invoice_address}</div>
+                )}
+                {selectedClient.gstin && <div className="text-muted-foreground">GST: {selectedClient.gstin}</div>}
+                <div className="text-muted-foreground">
+                  To: {selectedClient.invoice_to_email || selectedClient.email || '—'}
+                  {selectedClient.invoice_cc_emails ? ` (cc: ${selectedClient.invoice_cc_emails})` : ''}
+                </div>
+                {(!selectedClient.client_number || !(selectedClient.invoice_to_email || selectedClient.email)) && (
+                  <div className="text-amber-600 mt-1">
+                    Missing client # or invoice email — edit this client on the Clients tab first.
+                  </div>
+                )}
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Client #</Label>
-                <Input type="number" value={form.client_number}
-                  onChange={e => setForm(f => ({ ...f, client_number: e.target.value }))} />
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              <Label>Description</Label>
+              <Input value={description} onChange={e => setDescription(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Amount (INR)</Label>
+              <Input type="number" value={amount} onChange={e => setAmount(e.target.value)} />
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input type="radio" checked={sendMode === 'now'} onChange={() => setSendMode('now')} />
+                  Send now
+                </label>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input type="radio" checked={sendMode === 'schedule'} onChange={() => setSendMode('schedule')} />
+                  Schedule for a date
+                </label>
               </div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Description Label</Label>
-              <Input value={form.description_label}
-                onChange={e => setForm(f => ({ ...f, description_label: e.target.value }))} />
-              <span className="text-xs text-muted-foreground">
-                Printed as “{form.description_label || 'AMC'} for {'{'}Month{'}'} {'{'}Year{'}'}”
-              </span>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Invoice-to Email</Label>
-              <Input type="email" value={form.invoice_to_email}
-                onChange={e => setForm(f => ({ ...f, invoice_to_email: e.target.value }))} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>CC Emails</Label>
-              <Input value={form.invoice_cc_emails} placeholder="comma-separated"
-                onChange={e => setForm(f => ({ ...f, invoice_cc_emails: e.target.value }))} />
-            </div>
-            <div className="flex items-center gap-2 pt-1">
-              <input type="checkbox" id="active" checked={form.auto_invoice_active}
-                onChange={e => setForm(f => ({ ...f, auto_invoice_active: e.target.checked }))} />
-              <Label htmlFor="active">Auto-invoice this client monthly</Label>
+              {sendMode === 'schedule' && (
+                <DatePicker value={scheduledDate} onChange={setScheduledDate} placeholder="Pick a send date" />
+              )}
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          <DialogFooter className="justify-between sm:justify-between">
+            <Button variant="outline" onClick={previewDraft} disabled={!clientId}>
+              <Eye size={14} className="mr-1" /> Preview
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreate} disabled={creating}>
+                {creating ? 'Saving…' : sendMode === 'now' ? 'Send Now' : 'Schedule Invoice'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

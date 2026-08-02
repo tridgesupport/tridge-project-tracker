@@ -55,8 +55,7 @@ export interface InvoicePdfData {
   toName: string
   toAddress: string | null
   gstin: string | null
-  descriptionLabel: string
-  monthLabel: string
+  description: string
   amount: number
   bankDetails?: string | null
 }
@@ -64,7 +63,7 @@ export interface InvoicePdfData {
 function InvoiceDocument({ data }: { data: InvoicePdfData }) {
   const amountText = `INR ${data.amount.toFixed(2)}`
   const amountInWords = `${toWords.convert(data.amount, { currency: true })}`
-  const description = `${data.descriptionLabel} for ${data.monthLabel}`
+  const description = data.description
   const addressLines = (data.toAddress || '').split('\n').filter(Boolean)
 
   return (

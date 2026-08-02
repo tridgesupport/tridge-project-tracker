@@ -27,3 +27,26 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     WHERE id = ${id}`
   return NextResponse.json({ ok: true })
 }
+
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (session.user.role !== 'admin')
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { id } = await params
+  try {
+    await sql`DELETE FROM clients WHERE id = ${id}`
+  } catch (err) {
+    // Postgres 23503 = foreign_key_violation — invoices.client_id is ON DELETE
+    // RESTRICT so a client with invoice history can't be silently deleted.
+    if (err instanceof Error && 'code' in err && (err as { code: string }).code === '23503') {
+      return NextResponse.json(
+        { error: 'This client has invoice history and cannot be deleted. Set them to Inactive on the Invoices tab instead.' },
+        { status: 409 }
+      )
+    }
+    throw err
+  }
+  return NextResponse.json({ ok: true })
+}

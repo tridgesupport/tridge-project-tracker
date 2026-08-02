@@ -68,7 +68,9 @@ export interface Invoice {
   to_email: string | null
   cc_emails: string | null
   invoice_date: string
-  status: 'sent' | 'failed'
+  status: 'scheduled' | 'sent' | 'failed'
+  source: 'recurring' | 'manual'
+  scheduled_date: string | null
   error_message: string | null
   sent_at: string | null
   created_at: string

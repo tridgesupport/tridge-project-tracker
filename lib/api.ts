@@ -24,6 +24,8 @@ export const createClient = (data: Record<string, unknown>) =>
   apiFetch<Client>('/api/db/clients', { method: 'POST', body: JSON.stringify(data) })
 export const updateClient = (id: string, data: Record<string, unknown>) =>
   apiFetch<{ ok: true }>(`/api/db/clients/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteClient = (id: string) =>
+  apiFetch<{ ok: true }>(`/api/db/clients/${id}`, { method: 'DELETE' })
 
 export const getUsers = () => apiFetch<User[]>('/api/db/users')
 export const updateUser = (id: string, data: Record<string, unknown>) =>
@@ -55,7 +57,22 @@ export const createComment = (data: Record<string, unknown>) =>
 
 export const getInvoices = () => apiFetch<(Invoice & { client_name: string })[]>('/api/db/invoices')
 export const resendInvoice = (clientId: string, period?: { periodMonth: number; periodYear: number }) =>
-  apiFetch<{ outcome: string }>(`/api/invoices/${clientId}/resend`, {
+  apiFetch<{ outcome: string }>(`/api/invoices/client/${clientId}/resend`, {
     method: 'POST',
     body: JSON.stringify(period || {}),
   })
+
+export const createInvoice = (data: {
+  clientId: string
+  description: string
+  amount: number
+  sendNow: boolean
+  scheduledDate?: string
+}) => apiFetch<{ outcome: string; invoiceNumber: string }>('/api/invoices', {
+  method: 'POST',
+  body: JSON.stringify(data),
+})
+export const sendInvoiceNow = (id: string) =>
+  apiFetch<{ outcome: string }>(`/api/invoices/${id}/send`, { method: 'POST' })
+export const cancelInvoice = (id: string) =>
+  apiFetch<{ ok: true }>(`/api/invoices/${id}`, { method: 'DELETE' })

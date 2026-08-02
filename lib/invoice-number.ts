@@ -47,3 +47,14 @@ export function billingDateForPeriod(month: number, year: number): Date {
   }
   return new Date(year, month - 1, 30)
 }
+
+// Formats a Date's own local Y/M/D as 'YYYY-MM-DD' for storage in a Postgres
+// `date` column. `date.toISOString()` must NOT be used for this — it converts
+// to UTC first, which silently rolls the calendar date back a day whenever
+// the server's local timezone (e.g. IST, UTC+5:30) is ahead of UTC.
+export function toDateString(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}

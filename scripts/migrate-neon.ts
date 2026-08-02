@@ -72,7 +72,7 @@ async function migrate() {
   await sql`
     CREATE TABLE IF NOT EXISTS invoices (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      client_id uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      client_id uuid NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
       invoice_number text NOT NULL UNIQUE,
       fy_code text NOT NULL,
       client_number integer NOT NULL,
@@ -95,6 +95,29 @@ async function migrate() {
     )`
   await sql`CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id)`
   console.log('✓ invoices table')
+
+  // Deleting a client should never silently wipe their invoice history —
+  // block it instead (was CASCADE on the initial table creation).
+  await sql`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_client_id_fkey`
+  await sql`ALTER TABLE invoices ADD CONSTRAINT invoices_client_id_fkey
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT`
+  console.log('✓ invoices.client_id restrict-on-delete')
+
+  // Manual/scheduled invoices: distinguish cron-generated recurring invoices
+  // from ones created via the Create Invoice flow, and allow a "scheduled"
+  // (not yet sent) status.
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'recurring' CHECK (source IN ('recurring', 'manual'))`
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS scheduled_date date`
+  await sql`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_status_check`
+  await sql`ALTER TABLE invoices ADD CONSTRAINT invoices_status_check CHECK (status IN ('scheduled', 'sent', 'failed'))`
+  // The old blanket UNIQUE(client_id, period_year, period_month) prevented ANY
+  // second invoice for a client/month. Only the recurring monthly cron needs
+  // that guarantee (never double-bill the same period) — manual invoices should
+  // be free to coexist with a recurring one, or with each other, in the same month.
+  await sql`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_client_id_period_year_period_month_key`
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS invoices_recurring_period_uniq
+    ON invoices(client_id, period_year, period_month) WHERE source = 'recurring'`
+  console.log('✓ invoices source/scheduled_date/status')
 
   console.log('\nAll migrations complete!')
 }
