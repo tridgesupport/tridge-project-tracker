@@ -119,6 +119,13 @@ async function migrate() {
     ON invoices(client_id, period_year, period_month) WHERE source = 'recurring'`
   console.log('✓ invoices source/scheduled_date/status')
 
+  // Manually-tracked payment status per invoice (separate from send status).
+  await sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_status text NOT NULL DEFAULT 'unpaid'`
+  await sql`ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_payment_status_check`
+  await sql`ALTER TABLE invoices ADD CONSTRAINT invoices_payment_status_check
+    CHECK (payment_status IN ('unpaid', 'paid', 'overdue'))`
+  console.log('✓ invoices.payment_status')
+
   console.log('\nAll migrations complete!')
 }
 

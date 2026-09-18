@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react'
 import type { Client, Invoice } from '@/types'
 import {
   getClients, getInvoices, createInvoice, sendInvoiceNow, cancelInvoice, updateClient, resendInvoice,
+  updateInvoicePaymentStatus,
 } from '@/lib/api'
 import { monthLabel } from '@/lib/invoice-number'
 import { Button } from '@/components/ui/button'
@@ -23,7 +24,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { toast } from 'sonner'
-import { Plus, Eye, Send, X, Pencil } from 'lucide-react'
+import { Plus, Eye, Send, X, Pencil, Pause, Play } from 'lucide-react'
 
 type InvoiceWithClient = Invoice & { client_name: string }
 type InvoiceType = 'onetime' | 'recurring'
@@ -32,6 +33,14 @@ const statusStyles: Record<string, string> = {
   scheduled: 'bg-amber-100 text-amber-700',
   sent: 'bg-green-100 text-green-700',
   failed: 'bg-red-100 text-red-700',
+}
+
+const PAYMENT_STATUSES = ['unpaid', 'paid', 'overdue'] as const
+
+const paymentStatusStyles: Record<string, string> = {
+  unpaid: 'bg-amber-100 text-amber-700',
+  paid: 'bg-green-100 text-green-700',
+  overdue: 'bg-red-100 text-red-700',
 }
 
 function currentMonthLabel() {
@@ -211,6 +220,16 @@ export default function InvoicesPage() {
     window.open(`/api/invoices/${inv.id}/preview`, '_blank')
   }
 
+  async function handlePaymentStatusChange(inv: InvoiceWithClient, status: string) {
+    setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, payment_status: status as Invoice['payment_status'] } : i))
+    try {
+      await updateInvoicePaymentStatus(inv.id, status)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update payment status')
+      setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, payment_status: inv.payment_status } : i))
+    }
+  }
+
   function previewRecurring(c: Client) {
     window.open(`/api/invoices/client/${c.id}/preview`, '_blank')
   }
@@ -302,16 +321,17 @@ export default function InvoicesPage() {
                     <TableCell>{Number(c.amount).toFixed(2)}</TableCell>
                     <TableCell>{c.description_label}</TableCell>
                     <TableCell>
-                      <Badge
-                        onClick={() => toggleRecurringActive(c)}
-                        className={`cursor-pointer ${c.auto_invoice_active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}
-                        title="Click to toggle"
-                      >
-                        {c.auto_invoice_active ? 'Active' : 'Inactive'}
+                      <Badge className={c.auto_invoice_active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}>
+                        {c.auto_invoice_active ? 'Active' : 'Paused'}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => toggleRecurringActive(c)}
+                          disabled={busyId === c.id}
+                          title={c.auto_invoice_active ? 'Pause recurring billing' : 'Restart recurring billing'}>
+                          {c.auto_invoice_active ? <Pause size={14} /> : <Play size={14} />}
+                        </Button>
                         <Button variant="ghost" size="icon" onClick={() => openRecurringEdit(c)} title="Edit amount/description">
                           <Pencil size={14} />
                         </Button>
@@ -346,12 +366,13 @@ export default function InvoicesPage() {
                 <TableHead>Amount</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Payment Status</TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {invoices.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-sm text-muted-foreground">No invoices yet.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-sm text-muted-foreground">No invoices yet.</TableCell></TableRow>
               ) : invoices.map(inv => (
                 <TableRow key={inv.id}>
                   <TableCell className="font-medium">{inv.invoice_number}</TableCell>
@@ -364,6 +385,19 @@ export default function InvoicesPage() {
                     {inv.status === 'failed' && inv.error_message && (
                       <div className="text-xs text-muted-foreground mt-1 max-w-xs">{inv.error_message}</div>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Select value={inv.payment_status || 'unpaid'}
+                      onValueChange={(v: string | null) => v && handlePaymentStatusChange(inv, v)}>
+                      <SelectTrigger className={`h-7 text-xs w-28 capitalize ${paymentStatusStyles[inv.payment_status] || ''}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_STATUSES.map(s => (
+                          <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">

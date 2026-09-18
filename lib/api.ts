@@ -76,3 +76,8 @@ export const sendInvoiceNow = (id: string) =>
   apiFetch<{ outcome: string }>(`/api/invoices/${id}/send`, { method: 'POST' })
 export const cancelInvoice = (id: string) =>
   apiFetch<{ ok: true }>(`/api/invoices/${id}`, { method: 'DELETE' })
+export const updateInvoicePaymentStatus = (id: string, paymentStatus: string) =>
+  apiFetch<{ ok: true }>(`/api/invoices/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ payment_status: paymentStatus }),
+  })
