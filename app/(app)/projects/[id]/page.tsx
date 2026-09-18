@@ -34,7 +34,7 @@ function fmtDatetime(d: string) {
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
-  const { data: session } = useSession()
+  const { data: session, status: sessionStatus } = useSession()
   const isNew = id === 'new'
   const milestoneRef = useRef<HTMLDivElement>(null)
 
@@ -168,7 +168,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
   const canEdit = profile?.role === 'admin' || profile?.role === 'internal'
 
-  if (loading) return <div className="text-sm text-muted-foreground p-4">Loading…</div>
+  if (loading || sessionStatus === 'loading') {
+    return <div className="text-sm text-muted-foreground p-4">Loading…</div>
+  }
 
   if (!profile) {
     return (
